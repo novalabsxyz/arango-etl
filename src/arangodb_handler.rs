@@ -16,13 +16,7 @@ pub struct ArangodbHandler {
 impl ArangodbHandler {
     pub async fn new(settings: Settings, mode: Mode) -> Result<Self> {
         let store = FileStore::from_settings(&settings.ingest).await?;
-        let db = DB::new(
-            &settings.arangodb_endpoint,
-            &settings.arangodb_user,
-            &settings.arangodb_password,
-            &settings.arangodb_database,
-        )
-        .await?;
+        let db = DB::from_settings(&settings.arangodb).await?;
         Ok(Self {
             db,
             store,

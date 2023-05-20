@@ -1,3 +1,4 @@
+use crate::settings::ArangoDBSettings;
 use anyhow::Result;
 use arangors::{
     document::options::InsertOptions,
@@ -33,19 +34,15 @@ pub struct DB {
 }
 
 impl DB {
-    pub async fn new(
-        arangodb_endpoint: &str,
-        arangodb_user: &str,
-        arangodb_pass: &str,
-        arangodb_database: &str,
-    ) -> Result<Self> {
+    pub async fn from_settings(settings: &ArangoDBSettings) -> Result<Self> {
         let conn =
-            Connection::establish_jwt(arangodb_endpoint, arangodb_user, arangodb_pass).await?;
+            Connection::establish_jwt(&settings.endpoint, &settings.user, &settings.password)
+                .await?;
         tracing::debug!("databases: {:?}", conn.accessible_databases().await?);
 
         let existing_databases = conn.accessible_databases().await?;
-        let db = if !existing_databases.contains_key(arangodb_database) {
-            let inner = conn.create_database(arangodb_database).await?;
+        let db = if !existing_databases.contains_key(&settings.database) {
+            let inner = conn.create_database(&settings.database).await?;
             let beacons = inner.create_collection(BEACON_COLLECTION).await?;
             let hotspots = inner.create_collection(HOTSPOT_COLLECTION).await?;
             let witnesses = inner
@@ -109,16 +106,16 @@ impl DB {
                 witnesses,
             }
         } else {
-            tracing::debug!("reusing existing database {:?}", arangodb_database);
-            let inner = conn.db(arangodb_database).await?;
+            tracing::debug!("reusing existing database {:?}", &settings.database);
+            let inner = conn.db(&settings.database).await?;
             let beacons = inner.collection(BEACON_COLLECTION).await?;
-            tracing::debug!("reusing beacons collection from {:?}", arangodb_database);
+            tracing::debug!("reusing beacons collection from {:?}", &settings.database);
             let hotspots = inner.collection(HOTSPOT_COLLECTION).await?;
-            tracing::debug!("reusing hotspots collection from {:?}", arangodb_database);
+            tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
             let witnesses = inner.collection(WITNESS_EDGE_COLLECTION).await?;
             tracing::debug!(
                 "reusing witnesses edge collection from {:?}",
-                arangodb_database
+                &settings.database
             );
             Self {
                 conn,
@@ -358,4 +355,3 @@ fn witness_edge_key(beacon_loc: Option<u64>, witness_loc: Option<u64>) -> String
         (None, None) => "beacon_unknown_witness_unknown".to_string(),
     }
 }
-

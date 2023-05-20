@@ -4,31 +4,30 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArangoDBSettings {
+    #[serde(default = "default_arangodb_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_arangodb_user")]
+    pub user: String,
+    #[serde(default = "default_arangodb_password")]
+    pub password: String,
+    #[serde(default = "default_arangodb_database")]
+    pub database: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     // Configure logging level = debug
     #[serde(default = "default_log")]
     pub log: String,
     // Configure ingest file store settings
     pub ingest: FSettings,
-    // Configure cache path (tmp store for output parquet files before upload)
-    #[serde(default = "default_cache")]
-    pub cache: String,
-    #[serde(default = "default_arangodb_endpoint")]
-    pub arangodb_endpoint: String,
-    #[serde(default = "default_arangodb_user")]
-    pub arangodb_user: String,
-    #[serde(default = "default_arangodb_password")]
-    pub arangodb_password: String,
-    #[serde(default = "default_arangodb_database")]
-    pub arangodb_database: String,
+    // Configure arangodb settings
+    pub arangodb: ArangoDBSettings,
 }
 
 pub fn default_log() -> String {
     "arango_etl=debug".to_string()
-}
-
-pub fn default_cache() -> String {
-    "/tmp".to_string()
 }
 
 pub fn default_arangodb_endpoint() -> String {

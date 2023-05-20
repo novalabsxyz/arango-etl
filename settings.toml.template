@@ -1,10 +1,10 @@
-cache = "/tmp"
-log = "arango_etl=debug"
+log = "arango_etl=info"
 
-arangodb_endpoint =
-arangodb_user =
-arangodb_password =
-arangodb_database =
+[arangodb]
+endpoint = "http://localhost:8529"
+user = "root"
+password = "arangodb"
+database = "iot"
 
 [ingest]
 bucket = "helium-mainnet-iot-verified-rewards"
