@@ -1,0 +1,63 @@
+use config::{Config, Environment, File};
+use file_store::Settings as FSettings;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Settings {
+    // Configure logging level = debug
+    #[serde(default = "default_log")]
+    pub log: String,
+    // Configure ingest file store settings
+    pub ingest: FSettings,
+    // Configure cache path (tmp store for output parquet files before upload)
+    #[serde(default = "default_cache")]
+    pub cache: String,
+    #[serde(default = "default_arangodb_endpoint")]
+    pub arangodb_endpoint: String,
+    #[serde(default = "default_arangodb_user")]
+    pub arangodb_user: String,
+    #[serde(default = "default_arangodb_password")]
+    pub arangodb_password: String,
+    #[serde(default = "default_arangodb_database")]
+    pub arangodb_database: String,
+}
+
+pub fn default_log() -> String {
+    "arango_etl=debug".to_string()
+}
+
+pub fn default_cache() -> String {
+    "/tmp".to_string()
+}
+
+pub fn default_arangodb_endpoint() -> String {
+    "http://localhost:8925".to_string()
+}
+
+pub fn default_arangodb_user() -> String {
+    "root".to_string()
+}
+
+pub fn default_arangodb_password() -> String {
+    "arangodb".to_string()
+}
+
+pub fn default_arangodb_database() -> String {
+    "iot".to_string()
+}
+
+impl Settings {
+    pub fn new<P: AsRef<Path>>(path: Option<P>) -> Result<Self, config::ConfigError> {
+        let mut builder = Config::builder();
+
+        if let Some(file) = path {
+            builder = builder
+                .add_source(File::with_name(&file.as_ref().to_string_lossy()).required(false));
+        }
+        builder
+            .add_source(Environment::with_prefix("ARANGO_ETL").separator("_"))
+            .build()
+            .and_then(|config| config.try_deserialize())
+    }
+}

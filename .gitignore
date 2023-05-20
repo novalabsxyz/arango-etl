@@ -1,0 +1,6 @@
+settings.toml
+target/
+arangodb-data
+arangodb-apps-data
+*log
+*.log

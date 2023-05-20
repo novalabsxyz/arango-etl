@@ -1,0 +1,11 @@
+cache = "/tmp"
+log = "arango_etl=debug"
+
+arangodb_endpoint =
+arangodb_user =
+arangodb_password =
+arangodb_database =
+
+[ingest]
+bucket = "helium-mainnet-iot-verified-rewards"
+region = "us-west-2"
