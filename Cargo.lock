@@ -148,7 +148,6 @@ dependencies = [
  "lazy_static",
  "serde",
  "serde_json",
- "sqlx",
  "thiserror",
  "tokio",
  "tokio-util",
