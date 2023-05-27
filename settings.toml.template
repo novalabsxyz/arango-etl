@@ -6,6 +6,9 @@ user = "root"
 password = "arangodb"
 database = "iot"
 
+[tracker]
+interval = 60
+
 [ingest]
 bucket = "helium-mainnet-iot-verified-rewards"
 region = "us-west-2"

@@ -141,6 +141,7 @@ dependencies = [
  "env_logger",
  "file-store",
  "futures",
+ "futures-util",
  "h3ron",
  "helium-crypto",
  "helium-proto",
@@ -153,6 +154,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "triggered",
  "vincenty-core",
 ]
 

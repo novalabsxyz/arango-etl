@@ -1,4 +1,4 @@
-use crate::{arangodb_handler::ArangodbHandler, handler::Handler, settings::Settings, Mode};
+use crate::{arangodb_handler::ArangodbHandler, settings::Settings};
 use anyhow::Result;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -23,9 +23,8 @@ impl Cmd {
         let after_utc = Utc.from_utc_datetime(&self.after);
         let before_utc = Utc.from_utc_datetime(&self.before);
 
-        let handler_mode = Mode::Historical(before_utc, after_utc);
-        let handler = ArangodbHandler::new(settings.clone(), handler_mode).await?;
-        handler.process().await?;
+        let handler = ArangodbHandler::new(settings).await?;
+        handler.handle_history(before_utc, after_utc).await?;
         Ok(())
     }
 }

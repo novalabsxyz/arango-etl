@@ -306,7 +306,7 @@ impl DB {
         });
         self.populate_beacon(beacon_json).await?;
 
-        tracing::info!(
+        tracing::debug!(
             "stored beacon, poc_id: {:?}, # witnesses: {:?}",
             enc_poc_id,
             witnesses.len()
