@@ -7,7 +7,7 @@ use arangors::{
     ClientError, Collection, Connection, Database,
 };
 use base64::{engine::general_purpose, Engine as _};
-use file_store::iot_valid_poc::{IotPoc, IotVerifiedWitnessReport};
+use file_store::iot_valid_poc::{IotPoc, IotValidBeaconReport, IotVerifiedWitnessReport};
 use h3ron::{FromH3Index, H3Cell, ToCoordinate};
 use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::LoraPocV1;
@@ -187,10 +187,7 @@ impl DB {
 
     async fn populate_witness(
         &self,
-        beacon_pub_key: PublicKeyBinary,
-        beacon_loc: Option<u64>,
-        beacon_lat: Option<f64>,
-        beacon_lng: Option<f64>,
+        beacon_report: IotValidBeaconReport,
         witness: IotVerifiedWitnessReport,
         selected: bool,
     ) -> Result<serde_json::Value> {
@@ -200,9 +197,10 @@ impl DB {
         let (witness_lat, witness_lng) = lat_lng_from_h3_index(witness_loc)?;
         let witness_snr = witness.report.snr;
         let witness_signal = witness.report.signal;
+        let witness_ingest_unix = received_ts.timestamp_millis();
         let witness_json = json!({
             "ingest_time": received_ts,
-            "ingest_time_unix": received_ts.timestamp_millis(),
+            "ingest_time_unix": witness_ingest_unix,
             "location": witness_loc,
             "latitude": witness_lat,
             "longitude": witness_lng,
@@ -225,10 +223,19 @@ impl DB {
         self.populate_hotspot(witness_pub_key.clone(), witness_loc)
             .await?;
 
+        let beacon_ts = beacon_report.received_timestamp;
+        let beacon_ingest_unix = beacon_ts.timestamp_millis();
+        let beacon_loc = beacon_report.location;
+        let (beacon_lat, beacon_lng) = lat_lng_from_h3_index(beacon_loc)?;
+        let beacon_pub_key = beacon_report.report.pub_key;
+
         let distance =
             calc_distance(beacon_lat, beacon_lng, witness_lat, witness_lng)?.unwrap_or_default();
 
         let witness_edge_key = witness_edge_key(beacon_loc, witness_loc);
+        let ingest_latency = witness_ingest_unix
+            .checked_sub(beacon_ingest_unix)
+            .unwrap_or_default();
 
         let query = unindent(format!(
             r#"
@@ -240,12 +247,14 @@ impl DB {
                 count: 1,
                 distance: {distance},
                 snr_hist: {{"{witness_snr}": 1}},
-                signal_hist: {{"{witness_signal}": 1}}
+                signal_hist: {{"{witness_signal}": 1}},
+                ingest_latency_hist: {{"{ingest_latency}": 1}}
             }}
             UPDATE {{
                 count: OLD.count + 1,
                 snr_hist: MERGE(OLD.snr_hist, {{"{witness_snr}": OLD.snr_hist["{witness_snr}"] ? OLD.snr_hist["{witness_snr}"] + 1 : 1}}),
-                signal_hist: MERGE(OLD.signal_hist, {{"{witness_signal}": OLD.signal_hist["{witness_signal}"] ? OLD.signal_hist["{witness_signal}"] + 1 : 1}})
+                signal_hist: MERGE(OLD.signal_hist, {{"{witness_signal}": OLD.signal_hist["{witness_signal}"] ? OLD.signal_hist["{witness_signal}"] + 1 : 1}}),
+                ingest_latency_hist: MERGE(OLD.ingest_latency_hist, {{"{ingest_latency}": OLD.ingest_latency_hist["{ingest_latency}"] ? OLD.ingest_latency_hist["{ingest_latency}"] + 1 : 1}})
             }}
             IN {WITNESS_EDGE_COLLECTION}
             "#
@@ -261,61 +270,48 @@ impl DB {
     pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<()> {
         let iot_poc = IotPoc::try_from(dec_msg)?;
         let enc_poc_id = general_purpose::URL_SAFE_NO_PAD.encode(iot_poc.poc_id);
-        let beacon_ts = iot_poc.beacon_report.received_timestamp;
-        let beacon_pub_key = iot_poc.beacon_report.report.pub_key;
         let beacon_loc = iot_poc.beacon_report.location;
-        let (beacon_lat, beacon_lng) = lat_lng_from_h3_index(beacon_loc)?;
 
         if iot_poc.selected_witnesses.is_empty() {
             return Ok(());
         }
 
         // populate the beaconer in hotspots collection
-        self.populate_hotspot(beacon_pub_key.clone(), beacon_loc)
+        self.populate_hotspot(iot_poc.beacon_report.report.pub_key.clone(), beacon_loc)
             .await?;
 
         // gather all witnesses
         let mut witnesses = vec![];
         for witness in iot_poc.selected_witnesses {
             let selected_witness_json = self
-                .populate_witness(
-                    beacon_pub_key.clone(),
-                    beacon_loc,
-                    beacon_lat,
-                    beacon_lng,
-                    witness,
-                    true,
-                )
+                .populate_witness(iot_poc.beacon_report.clone(), witness, true)
                 .await?;
             witnesses.push(selected_witness_json);
         }
 
         for witness in iot_poc.unselected_witnesses {
             let unselected_witness_json = self
-                .populate_witness(
-                    beacon_pub_key.clone(),
-                    beacon_loc,
-                    beacon_lat,
-                    beacon_lng,
-                    witness,
-                    false,
-                )
+                .populate_witness(iot_poc.beacon_report.clone(), witness, false)
                 .await?;
             witnesses.push(unselected_witness_json);
         }
 
+        let beacon_ts = iot_poc.beacon_report.received_timestamp;
+        let beacon_ingest_unix = beacon_ts.timestamp_millis();
+        let beacon_loc = iot_poc.beacon_report.location;
+        let (beacon_lat, beacon_lng) = lat_lng_from_h3_index(beacon_loc)?;
         // populate the beacons collection
         let beacon_json = json!({
             "_key": enc_poc_id,
             "poc_id": enc_poc_id,
             "ingest_time": beacon_ts,
-            "ingest_time_unix": beacon_ts.timestamp_millis(),
+            "ingest_time_unix": beacon_ingest_unix,
             "location": beacon_loc,
             "latitude": beacon_lat,
             "longitude": beacon_lng,
             "hex_scale": iot_poc.beacon_report.hex_scale,
             "reward_unit": iot_poc.beacon_report.reward_unit,
-            "pub_key": beacon_pub_key.clone(),
+            "pub_key": iot_poc.beacon_report.report.pub_key.clone(),
             "frequency": iot_poc.beacon_report.report.frequency,
             "channel": iot_poc.beacon_report.report.channel,
             "tx_power": iot_poc.beacon_report.report.tx_power,
