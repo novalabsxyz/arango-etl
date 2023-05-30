@@ -10,7 +10,7 @@ use std::path;
 pub enum Cmd {
     /// Run in historical data gathering mode
     History(history::Cmd),
-    /// Run in current data gathering mode
+    /// Run in current mode by starting a server
     Current(current::Server),
 }
 

@@ -7,7 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, clap::Args)]
 pub struct Server {
-    /// Required start time to look for (inclusive)
+    /// Required start time to begin from (inclusive)
     #[clap(long)]
     after: NaiveDateTime,
 }

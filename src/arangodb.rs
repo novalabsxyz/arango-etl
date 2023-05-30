@@ -4,13 +4,13 @@ use arangors::{
     document::options::InsertOptions,
     index::{Index, IndexSettings},
     uclient::reqwest::ReqwestClient,
-    Collection, Connection, Database,
+    ClientError, Collection, Connection, Database,
 };
 use base64::{engine::general_purpose, Engine as _};
 use file_store::iot_valid_poc::{IotPoc, IotVerifiedWitnessReport};
 use h3ron::{FromH3Index, H3Cell, ToCoordinate};
 use helium_crypto::PublicKeyBinary;
-use helium_proto::{services::poc_lora::LoraPocV1, Message};
+use helium_proto::services::poc_lora::LoraPocV1;
 use serde_json::json;
 use vincenty_core::distance_from_points;
 
@@ -20,6 +20,7 @@ type ArangoDatabase = Database<ReqwestClient>;
 const BEACON_COLLECTION: &str = "beacons";
 const HOTSPOT_COLLECTION: &str = "hotspots";
 const WITNESS_EDGE_COLLECTION: &str = "witnesses";
+const PROCESSED_FILES_COLLECTION: &str = "processed_files";
 
 #[derive(Debug)]
 pub struct DB {
@@ -31,6 +32,8 @@ pub struct DB {
     pub hotspots: ArangoCollection,
     // This collection will store all beacon-witness edges
     pub witnesses: ArangoCollection,
+    // This collection will store names of all processed iot-poc files
+    pub processed_files: ArangoCollection,
 }
 
 impl DB {
@@ -45,6 +48,7 @@ impl DB {
             let inner = conn.create_database(&settings.database).await?;
             let beacons = inner.create_collection(BEACON_COLLECTION).await?;
             let hotspots = inner.create_collection(HOTSPOT_COLLECTION).await?;
+            let processed_files = inner.create_collection(PROCESSED_FILES_COLLECTION).await?;
             let witnesses = inner
                 .create_edge_collection(WITNESS_EDGE_COLLECTION)
                 .await?;
@@ -104,6 +108,7 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
+                processed_files,
             }
         } else {
             tracing::debug!("reusing existing database {:?}", &settings.database);
@@ -111,6 +116,8 @@ impl DB {
             let beacons = inner.collection(BEACON_COLLECTION).await?;
             tracing::debug!("reusing beacons collection from {:?}", &settings.database);
             let hotspots = inner.collection(HOTSPOT_COLLECTION).await?;
+            tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
+            let processed_files = inner.collection(PROCESSED_FILES_COLLECTION).await?;
             tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
             let witnesses = inner.collection(WITNESS_EDGE_COLLECTION).await?;
             tracing::debug!(
@@ -123,6 +130,7 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
+                processed_files,
             }
         };
         Ok(db)
@@ -142,25 +150,39 @@ impl DB {
             "latitude": lat,
             "longitude": lng,
         });
-
-        if self
-            .hotspots
-            .create_document(hotspot_json, InsertOptions::builder().build())
-            .await
-            .is_ok()
-        {
-            tracing::debug!("successfully inserted hotspot {:?}", hotspot_pub_key)
-        }
-
+        self.insert_document(&self.hotspots, hotspot_json, "hotspot")
+            .await?;
         Ok(())
     }
 
     async fn populate_beacon(&self, beacon_json: serde_json::Value) -> Result<()> {
-        self.beacons
-            .create_document(beacon_json, InsertOptions::builder().build())
+        self.insert_document(&self.beacons, beacon_json, "beacon")
             .await?;
-
         Ok(())
+    }
+
+    async fn insert_document(
+        &self,
+        collection: &ArangoCollection,
+        doc: serde_json::Value,
+        doc_name: &str,
+    ) -> Result<()> {
+        match collection
+            .create_document(doc, InsertOptions::builder().build())
+            .await
+        {
+            Ok(_) => {
+                tracing::debug!("successfully inserted {:?} document", doc_name);
+                Ok(())
+            }
+            Err(err) => match err {
+                ClientError::Arango(ae) if ae.error_num() == 1210 => {
+                    tracing::debug!("skipping already inserted {:?} doc", doc_name);
+                    Ok(())
+                }
+                _ => Err(err.into()),
+            },
+        }
     }
 
     async fn populate_witness(
@@ -236,8 +258,7 @@ impl DB {
         Ok(witness_json)
     }
 
-    pub async fn populate_collections(&self, msg: &[u8]) -> Result<()> {
-        let dec_msg = LoraPocV1::decode(msg)?;
+    pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<()> {
         let iot_poc = IotPoc::try_from(dec_msg)?;
         let enc_poc_id = general_purpose::URL_SAFE_NO_PAD.encode(iot_poc.poc_id);
         let beacon_ts = iot_poc.beacon_report.received_timestamp;

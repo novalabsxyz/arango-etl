@@ -1,8 +1,9 @@
-use crate::{arangodb::DB, settings::Settings, LOADER_WORKERS};
-use anyhow::Result;
+use crate::{arangodb::DB, settings::Settings};
+use anyhow::{Error, Result};
 use chrono::{DateTime, Utc};
-use file_store::{FileStore, FileType};
-use futures::StreamExt;
+use file_store::{FileInfo, FileStore, FileType};
+use futures::stream::TryStreamExt;
+use helium_proto::{services::poc_lora::LoraPocV1, Message};
 
 #[derive(Debug)]
 pub struct ArangodbHandler {
@@ -25,43 +26,39 @@ impl ArangodbHandler {
         tracing::debug!("before_ts: {:?}", before_ts);
         tracing::debug!("after_ts: {:?}", after_ts);
 
-        let file_list = self
-            .store
+        self.store
             .list(FileType::IotPoc, after_ts, before_ts)
-            .boxed();
-
-        let mut file_infos = self.store.source_unordered(LOADER_WORKERS, file_list);
-
-        while let Some(msg) = file_infos.next().await {
-            // NOTE: Doing a match statement to just log and keep going in case of errors
-            match msg {
-                Ok(m) => match self.db.populate_collections(&m).await {
-                    Ok(_) => tracing::debug!("populated successfully!"),
-                    Err(e) => tracing::error!("failed to populate_collections: {:?}", e),
-                },
-                Err(e) => tracing::error!("failed to get next msg: {:?}", e),
-            }
-        }
+            .map_err(Error::from)
+            .and_then(|file| self.process_file(file))
+            .try_fold((), |_, r| async move { Ok(r) })
+            .await?;
 
         Ok(())
     }
 
     pub async fn handle_current(&self, after_ts: DateTime<Utc>) -> Result<()> {
         tracing::debug!("finding files after_ts: {:?}", after_ts);
-        let file_list = self.store.list(FileType::IotPoc, after_ts, None).boxed();
-        let mut file_infos = self.store.source_unordered(LOADER_WORKERS, file_list);
 
-        while let Some(msg) = file_infos.next().await {
-            // NOTE: Doing a match statement to just log and keep going in case of errors
-            match msg {
-                Ok(m) => match self.db.populate_collections(&m).await {
-                    Ok(_) => tracing::debug!("populated successfully!"),
-                    Err(e) => tracing::error!("failed to populate_collections: {:?}", e),
-                },
-                Err(e) => tracing::error!("failed to get next msg: {:?}", e),
-            }
-        }
+        self.store
+            .list(FileType::IotPoc, after_ts, None)
+            .map_err(Error::from)
+            .and_then(|file| self.process_file(file))
+            .try_fold((), |_, r| async move { Ok(r) })
+            .await?;
 
+        Ok(())
+    }
+
+    async fn process_file(&self, file: FileInfo) -> Result<()> {
+        tracing::info!("file: {:?}", file);
+        self.store
+            .stream_file(file)
+            .await?
+            .map_err(Error::from)
+            .and_then(|buf| async { LoraPocV1::decode(buf).map_err(Error::from) })
+            .and_then(|dec_msg| async move { self.db.populate_collections(dec_msg).await })
+            .try_fold((), |_, r| async move { Ok(r) })
+            .await?;
         Ok(())
     }
 }
