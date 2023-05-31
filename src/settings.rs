@@ -1,7 +1,15 @@
+use chrono::Duration;
 use config::{Config, Environment, File};
 use file_store::Settings as FSettings;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TrackerSettings {
+    /// Tick interval (secs). Default = 60s.
+    #[serde(default = "default_interval")]
+    pub interval: i64,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ArangoDBSettings {
@@ -24,6 +32,12 @@ pub struct Settings {
     pub ingest: FSettings,
     // Configure arangodb settings
     pub arangodb: ArangoDBSettings,
+    // Configure current tracker settings
+    pub tracker: TrackerSettings,
+}
+
+pub fn default_interval() -> i64 {
+    60
 }
 
 pub fn default_log() -> String {
@@ -58,5 +72,9 @@ impl Settings {
             .add_source(Environment::with_prefix("ARANGO_ETL").separator("_"))
             .build()
             .and_then(|config| config.try_deserialize())
+    }
+
+    pub fn interval(&self) -> Duration {
+        Duration::seconds(self.tracker.interval)
     }
 }
