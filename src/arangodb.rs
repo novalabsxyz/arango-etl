@@ -188,15 +188,15 @@ impl DB {
     async fn populate_witness(
         &self,
         beacon_report: IotValidBeaconReport,
-        witness: IotVerifiedWitnessReport,
+        witness_report: IotVerifiedWitnessReport,
         selected: bool,
     ) -> Result<serde_json::Value> {
-        let received_ts = witness.received_timestamp;
-        let witness_pub_key = witness.report.pub_key;
-        let witness_loc = witness.location;
+        let received_ts = witness_report.received_timestamp;
+        let witness_pub_key = witness_report.report.pub_key;
+        let witness_loc = witness_report.location;
         let (witness_lat, witness_lng) = lat_lng_from_h3_index(witness_loc)?;
-        let witness_snr = witness.report.snr;
-        let witness_signal = witness.report.signal;
+        let witness_snr = witness_report.report.snr;
+        let witness_signal = witness_report.report.signal;
         let witness_ingest_unix = received_ts.timestamp_millis();
         let witness_json = json!({
             "ingest_time": received_ts,
@@ -204,19 +204,19 @@ impl DB {
             "location": witness_loc,
             "latitude": witness_lat,
             "longitude": witness_lng,
-            "hex_scale": witness.hex_scale,
-            "reward_unit": witness.reward_unit,
-            "verification_status": witness.status,
-            "invalid_reason": witness.invalid_reason,
-            "participant_side": witness.participant_side,
+            "hex_scale": witness_report.hex_scale,
+            "reward_unit": witness_report.reward_unit,
+            "verification_status": witness_report.status,
+            "invalid_reason": witness_report.invalid_reason,
+            "participant_side": witness_report.participant_side,
             "pub_key": witness_pub_key,
-            "timestamp": witness.report.timestamp,
-            "tmst": witness.report.tmst,
-            "frequency": witness.report.frequency,
+            "timestamp": witness_report.report.timestamp,
+            "tmst": witness_report.report.tmst,
+            "frequency": witness_report.report.frequency,
             "signal": witness_signal,
             "snr": witness_snr,
-            "gain": witness.gain,
-            "elevation": witness.elevation,
+            "gain": witness_report.gain,
+            "elevation": witness_report.elevation,
             "selected": selected
         });
 
@@ -282,16 +282,16 @@ impl DB {
 
         // gather all witnesses
         let mut witnesses = vec![];
-        for witness in iot_poc.selected_witnesses {
+        for witness_report in iot_poc.selected_witnesses {
             let selected_witness_json = self
-                .populate_witness(iot_poc.beacon_report.clone(), witness, true)
+                .populate_witness(iot_poc.beacon_report.clone(), witness_report, true)
                 .await?;
             witnesses.push(selected_witness_json);
         }
 
-        for witness in iot_poc.unselected_witnesses {
+        for witness_report in iot_poc.unselected_witnesses {
             let unselected_witness_json = self
-                .populate_witness(iot_poc.beacon_report.clone(), witness, false)
+                .populate_witness(iot_poc.beacon_report.clone(), witness_report, false)
                 .await?;
             witnesses.push(unselected_witness_json);
         }
