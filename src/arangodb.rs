@@ -20,7 +20,7 @@ type ArangoDatabase = Database<ReqwestClient>;
 const BEACON_COLLECTION: &str = "beacons";
 const HOTSPOT_COLLECTION: &str = "hotspots";
 const WITNESS_EDGE_COLLECTION: &str = "witnesses";
-const PROCESSED_FILES_COLLECTION: &str = "processed_files";
+const FILES_COLLECTION: &str = "files";
 
 #[derive(Debug)]
 pub struct DB {
@@ -33,7 +33,7 @@ pub struct DB {
     // This collection will store all beacon-witness edges
     pub witnesses: ArangoCollection,
     // This collection will store names of all processed iot-poc files
-    pub processed_files: ArangoCollection,
+    pub files: ArangoCollection,
 }
 
 impl DB {
@@ -48,7 +48,7 @@ impl DB {
             let inner = conn.create_database(&settings.database).await?;
             let beacons = inner.create_collection(BEACON_COLLECTION).await?;
             let hotspots = inner.create_collection(HOTSPOT_COLLECTION).await?;
-            let processed_files = inner.create_collection(PROCESSED_FILES_COLLECTION).await?;
+            let files = inner.create_collection(FILES_COLLECTION).await?;
             let witnesses = inner
                 .create_edge_collection(WITNESS_EDGE_COLLECTION)
                 .await?;
@@ -108,7 +108,7 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
-                processed_files,
+                files,
             }
         } else {
             tracing::debug!("reusing existing database {:?}", &settings.database);
@@ -117,7 +117,7 @@ impl DB {
             tracing::debug!("reusing beacons collection from {:?}", &settings.database);
             let hotspots = inner.collection(HOTSPOT_COLLECTION).await?;
             tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
-            let processed_files = inner.collection(PROCESSED_FILES_COLLECTION).await?;
+            let files = inner.collection(FILES_COLLECTION).await?;
             tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
             let witnesses = inner.collection(WITNESS_EDGE_COLLECTION).await?;
             tracing::debug!(
@@ -130,10 +130,37 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
-                processed_files,
+                files,
             }
         };
         Ok(db)
+    }
+
+    pub async fn init_files(&self, keys: &[String]) -> Result<()> {
+        for key in keys {
+            let doc = json!({"_key": key, "done": false});
+            self.insert_document(&self.files, doc, "file", InsertOptions::builder().build())
+                .await?;
+            tracing::info!("init file: {:?}", key);
+        }
+
+        Ok(())
+    }
+
+    pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
+        for key in keys {
+            let doc = json!({"_key": key, "done": true});
+            self.insert_document(
+                &self.files,
+                doc,
+                "file",
+                InsertOptions::builder().overwrite(true).build(),
+            )
+            .await?;
+            tracing::info!("completed file: {:?}", key);
+        }
+
+        Ok(())
     }
 
     async fn populate_hotspot(
@@ -150,14 +177,24 @@ impl DB {
             "latitude": lat,
             "longitude": lng,
         });
-        self.insert_document(&self.hotspots, hotspot_json, "hotspot")
-            .await?;
+        self.insert_document(
+            &self.hotspots,
+            hotspot_json,
+            "hotspot",
+            InsertOptions::builder().build(),
+        )
+        .await?;
         Ok(())
     }
 
     async fn populate_beacon(&self, beacon_json: serde_json::Value) -> Result<()> {
-        self.insert_document(&self.beacons, beacon_json, "beacon")
-            .await?;
+        self.insert_document(
+            &self.beacons,
+            beacon_json,
+            "beacon",
+            InsertOptions::builder().build(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -166,11 +203,9 @@ impl DB {
         collection: &ArangoCollection,
         doc: serde_json::Value,
         doc_name: &str,
+        options: InsertOptions,
     ) -> Result<()> {
-        match collection
-            .create_document(doc, InsertOptions::builder().build())
-            .await
-        {
+        match collection.create_document(doc, options).await {
             Ok(_) => {
                 tracing::debug!("successfully inserted {:?} document", doc_name);
                 Ok(())

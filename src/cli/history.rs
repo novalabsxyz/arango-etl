@@ -24,7 +24,7 @@ impl Cmd {
         let before_utc = Utc.from_utc_datetime(&self.before);
 
         let handler = ArangodbHandler::new(settings).await?;
-        handler.handle_history(before_utc, after_utc).await?;
+        handler.process(after_utc, Some(before_utc)).await?;
         Ok(())
     }
 }

@@ -1,4 +1,6 @@
 log = "arango_etl=info"
+num_loaders = 16
+max_ingest = 32
 
 [arangodb]
 endpoint = "http://localhost:8529"
@@ -7,7 +9,7 @@ password = "arangodb"
 database = "iot"
 
 [tracker]
-interval = 60
+interval = 10
 
 [ingest]
 bucket = "helium-mainnet-iot-verified-rewards"
