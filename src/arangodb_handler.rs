@@ -50,7 +50,6 @@ impl ArangodbHandler {
     }
 
     async fn process_file(&self, file: FileInfo) -> Result<()> {
-        tracing::info!("file: {:?}", file);
         self.store
             .stream_file(file)
             .await?

@@ -1,8 +1,8 @@
-use crate::{settings::Settings, tracker_server::TrackerServer};
-use anyhow::{Error, Result};
+use crate::{settings::Settings, tracker};
+use anyhow::Result;
 use chrono::{NaiveDateTime, TimeZone, Utc};
-use futures_util::TryFutureExt;
-use tokio::{self, signal};
+use tokio::time::Duration;
+use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, clap::Args)]
@@ -19,20 +19,21 @@ impl Server {
             .with(tracing_subscriber::fmt::layer())
             .init();
 
-        // configure shutdown trigger
-        let (shutdown_trigger, shutdown) = triggered::trigger();
-
-        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())?;
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = sigterm.recv() => shutdown_trigger.trigger(),
-                _ = signal::ctrl_c() => shutdown_trigger.trigger(),
-            }
-        });
-
         let after_utc = Utc.from_utc_datetime(&self.after);
-        let mut tracker = TrackerServer::new(settings, after_utc).await?;
+        let tracker = tracker::Tracker::new(settings, after_utc).await?;
+        let subsystem = |subsys: SubsystemHandle| async { tracker::run(tracker, subsys).await };
 
-        tokio::try_join!(tracker.run(&shutdown).map_err(Error::from),).map(|_| ())
+        match Toplevel::new()
+            .start("tracker", subsystem)
+            .catch_signals()
+            .handle_shutdown_requests(Duration::from_millis(500))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("error: {:?}", e);
+                Err(e.into())
+            }
+        }
     }
 }
