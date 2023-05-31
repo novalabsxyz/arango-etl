@@ -20,7 +20,7 @@ type ArangoDatabase = Database<ReqwestClient>;
 const BEACON_COLLECTION: &str = "beacons";
 const HOTSPOT_COLLECTION: &str = "hotspots";
 const WITNESS_EDGE_COLLECTION: &str = "witnesses";
-const PROCESSED_FILES_COLLECTION: &str = "processed_files";
+const FILES_COLLECTION: &str = "files";
 
 #[derive(Debug)]
 pub struct DB {
@@ -33,7 +33,7 @@ pub struct DB {
     // This collection will store all beacon-witness edges
     pub witnesses: ArangoCollection,
     // This collection will store names of all processed iot-poc files
-    pub processed_files: ArangoCollection,
+    pub files: ArangoCollection,
 }
 
 impl DB {
@@ -48,7 +48,7 @@ impl DB {
             let inner = conn.create_database(&settings.database).await?;
             let beacons = inner.create_collection(BEACON_COLLECTION).await?;
             let hotspots = inner.create_collection(HOTSPOT_COLLECTION).await?;
-            let processed_files = inner.create_collection(PROCESSED_FILES_COLLECTION).await?;
+            let files = inner.create_collection(FILES_COLLECTION).await?;
             let witnesses = inner
                 .create_edge_collection(WITNESS_EDGE_COLLECTION)
                 .await?;
@@ -108,7 +108,7 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
-                processed_files,
+                files,
             }
         } else {
             tracing::debug!("reusing existing database {:?}", &settings.database);
@@ -117,7 +117,7 @@ impl DB {
             tracing::debug!("reusing beacons collection from {:?}", &settings.database);
             let hotspots = inner.collection(HOTSPOT_COLLECTION).await?;
             tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
-            let processed_files = inner.collection(PROCESSED_FILES_COLLECTION).await?;
+            let files = inner.collection(FILES_COLLECTION).await?;
             tracing::debug!("reusing hotspots collection from {:?}", &settings.database);
             let witnesses = inner.collection(WITNESS_EDGE_COLLECTION).await?;
             tracing::debug!(
@@ -130,7 +130,7 @@ impl DB {
                 beacons,
                 hotspots,
                 witnesses,
-                processed_files,
+                files,
             }
         };
         Ok(db)

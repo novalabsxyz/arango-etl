@@ -6,7 +6,7 @@ use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TrackerSettings {
-    /// Tick interval (secs). Default = 60s.
+    /// Tick interval (secs). Default = 10s.
     #[serde(default = "default_interval")]
     pub interval: i64,
 }
@@ -28,6 +28,12 @@ pub struct Settings {
     // Configure logging level = debug
     #[serde(default = "default_log")]
     pub log: String,
+    // Configure num of loaders for sourcing iot-poc files from S3 bucket
+    #[serde(default = "default_num_loaders")]
+    pub num_loaders: usize,
+    // Configure max ingest (number of messages to ingest into arangodb concurrently)
+    #[serde(default = "default_max_ingest")]
+    pub max_ingest: usize,
     // Configure ingest file store settings
     pub ingest: FSettings,
     // Configure arangodb settings
@@ -36,8 +42,16 @@ pub struct Settings {
     pub tracker: TrackerSettings,
 }
 
+pub fn default_num_loaders() -> usize {
+    16
+}
+
+pub fn default_max_ingest() -> usize {
+    32
+}
+
 pub fn default_interval() -> i64 {
-    60
+    10
 }
 
 pub fn default_log() -> String {

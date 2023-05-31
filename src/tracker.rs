@@ -1,5 +1,5 @@
 use crate::{arangodb_handler::ArangodbHandler, settings::Settings};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use tokio::time;
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -23,13 +23,6 @@ impl Tracker {
 }
 
 pub async fn run(mut tracker: Tracker, subsys: SubsystemHandle) -> Result<()> {
-    tracing::info!("start current tracker @ {:?}", tracker.after_utc);
-    tracker
-        .arangodb_handler
-        .handle_current(tracker.after_utc)
-        .await?;
-    tracing::info!("done processing initial tick @ {:?}", tracker.after_utc);
-
     let mut trigger = time::interval(tracker.interval_duration.to_std()?);
 
     loop {
@@ -40,14 +33,21 @@ pub async fn run(mut tracker: Tracker, subsys: SubsystemHandle) -> Result<()> {
             }
             _ = trigger.tick() => {
                 let previous_utc = tracker.after_utc;
-                let next_utc = previous_utc.checked_add_signed(tracker.interval_duration).unwrap_or(previous_utc);
+                let mut next_utc = previous_utc.checked_add_signed(tracker.interval_duration).context("failed to get next_utc")?;
+                tracing::info!("start processing next tick for {:?}", next_utc);
+                if let Ok(max_ts) = tracker.arangodb_handler.process(next_utc, None).await {
+                    tracing::info!("max_ts {:?}", max_ts);
+                    if max_ts >= next_utc {
+                        next_utc = max_ts;
+                    }
+                }
+
                 tracker.after_utc = next_utc;
-                tracing::info!("start processing next tick @ {:?}", next_utc);
-                tracker.arangodb_handler.handle_current(next_utc).await?;
-                tracing::info!("done processing next tick @ {:?}", next_utc);
+                tracing::info!("done processing for {:?}", next_utc);
+                tracing::info!("scheduling next tick for {:?}", next_utc.checked_add_signed(tracker.interval_duration));
             }
         }
     }
-    tracing::info!("stopping current tracker @ {:?}", tracker.after_utc);
+    tracing::info!("stopping current tracker for {:?}", tracker.after_utc);
     Ok(())
 }
