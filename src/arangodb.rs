@@ -136,6 +136,33 @@ impl DB {
         Ok(db)
     }
 
+    pub async fn init_files(&self, keys: &[String]) -> Result<()> {
+        for key in keys {
+            let doc = json!({"_key": key, "done": false});
+            self.insert_document(&self.files, doc, "file", InsertOptions::builder().build())
+                .await?;
+            tracing::info!("init file: {:?}", key);
+        }
+
+        Ok(())
+    }
+
+    pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
+        for key in keys {
+            let doc = json!({"_key": key, "done": true});
+            self.insert_document(
+                &self.files,
+                doc,
+                "file",
+                InsertOptions::builder().overwrite(true).build(),
+            )
+            .await?;
+            tracing::info!("completed file: {:?}", key);
+        }
+
+        Ok(())
+    }
+
     async fn populate_hotspot(
         &self,
         hotspot_pub_key: PublicKeyBinary,
@@ -150,14 +177,24 @@ impl DB {
             "latitude": lat,
             "longitude": lng,
         });
-        self.insert_document(&self.hotspots, hotspot_json, "hotspot")
-            .await?;
+        self.insert_document(
+            &self.hotspots,
+            hotspot_json,
+            "hotspot",
+            InsertOptions::builder().build(),
+        )
+        .await?;
         Ok(())
     }
 
     async fn populate_beacon(&self, beacon_json: serde_json::Value) -> Result<()> {
-        self.insert_document(&self.beacons, beacon_json, "beacon")
-            .await?;
+        self.insert_document(
+            &self.beacons,
+            beacon_json,
+            "beacon",
+            InsertOptions::builder().build(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -166,11 +203,9 @@ impl DB {
         collection: &ArangoCollection,
         doc: serde_json::Value,
         doc_name: &str,
+        options: InsertOptions,
     ) -> Result<()> {
-        match collection
-            .create_document(doc, InsertOptions::builder().build())
-            .await
-        {
+        match collection.create_document(doc, options).await {
             Ok(_) => {
                 tracing::debug!("successfully inserted {:?} document", doc_name);
                 Ok(())

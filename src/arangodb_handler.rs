@@ -1,7 +1,7 @@
 use crate::{arangodb::DB, settings::Settings};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use file_store::{FileStore, FileType};
+use file_store::{FileInfo, FileStore, FileType};
 use futures::stream::{self, StreamExt};
 use helium_proto::{services::poc_lora::LoraPocV1, Message};
 use std::sync::Arc;
@@ -39,7 +39,7 @@ impl ArangodbHandler {
 
         let ft = FileType::IotPoc;
         let file_list = self.store.list_all(ft, after_ts, before_ts).await?;
-        tracing::info!("# files: {:#?}", file_list);
+        tracing::info!("files: {:#?}", file_list);
 
         if file_list.is_empty() {
             tracing::info!("no available ingest files of type {ft}");
@@ -54,9 +54,30 @@ impl ArangodbHandler {
             }
         }
 
-        let mut stream = self
-            .store
-            .source_unordered(self.num_loaders, stream::iter(file_list).map(Ok).boxed());
+        let keys: Vec<String> = file_list.iter().map(|fi| fi.key.clone()).collect();
+
+        self.init_files(&keys).await?;
+        self.process_files(file_list).await?;
+        self.complete_files(&keys).await?;
+
+        Ok(max_ts)
+    }
+
+    async fn init_files(&self, keys: &[String]) -> Result<()> {
+        self.db.init_files(keys).await?;
+        Ok(())
+    }
+
+    async fn complete_files(&self, keys: &[String]) -> Result<()> {
+        self.db.complete_files(keys).await?;
+        Ok(())
+    }
+
+    async fn process_files(&self, file_list: Vec<FileInfo>) -> Result<()> {
+        let mut stream = self.store.source_unordered(
+            self.num_loaders,
+            stream::iter(file_list.clone()).map(Ok).boxed(),
+        );
 
         let mut set = JoinSet::new();
 
@@ -90,7 +111,6 @@ impl ArangodbHandler {
         while !set.is_empty() {
             set.join_next().await;
         }
-
-        Ok(max_ts)
+        Ok(())
     }
 }
