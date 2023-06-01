@@ -138,6 +138,7 @@ dependencies = [
  "chrono",
  "clap 4.3.0",
  "config",
+ "deadpool-redis",
  "env_logger",
  "file-store",
  "futures",
@@ -147,6 +148,7 @@ dependencies = [
  "helium-proto",
  "http",
  "lazy_static",
+ "redis",
  "serde",
  "serde_json",
  "thiserror",
@@ -1162,7 +1164,7 @@ dependencies = [
 [[package]]
 name = "beacon"
 version = "0.1.0"
-source = "git+https://github.com/helium/gateway-rs.git?branch=main#6fee25879eb308f159cb5d4ead77e3806a0a9971"
+source = "git+https://github.com/helium/gateway-rs.git?branch=main#7556cbac64062ab8fa003c0b5dc8aa4c8019ad18"
 dependencies = [
  "base64 0.21.0",
  "byteorder",
@@ -1469,6 +1471,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
+name = "combine"
+version = "4.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35ed6e9d84f0b51a7f52daf1c7d71dd136fd7a3f41a8462b8cdb8c78d920fad4"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "config"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1712,6 +1728,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadpool"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
+dependencies = [
+ "async-trait",
+ "deadpool-runtime",
+ "num_cpus",
+ "retain_mut",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-redis"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f1760f60ffc6653b4afd924c5792098d8c00d9a3deb6b3d989eac17949dc422"
+dependencies = [
+ "deadpool",
+ "redis",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa37046cc0f6c3cc6090fbdbf73ef0b8ef4cfcc37f6befc0020f63e8cf121e1"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "der"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1937,7 +1985,7 @@ dependencies = [
 [[package]]
 name = "file-store"
 version = "0.1.0"
-source = "git+https://github.com/helium/oracles?branch=main#c5968c1e9196b7e255436328c33e93be729aa280"
+source = "git+https://github.com/helium/oracles?branch=main#097f0c4a850efeb63076e9d3bbbd215ec0092fae"
 dependencies = [
  "async-compression",
  "async-trait",
@@ -2364,7 +2412,7 @@ dependencies = [
 [[package]]
 name = "helium-proto"
 version = "0.1.0"
-source = "git+https://github.com/helium/proto?branch=master#2f4727866968b044d4663847f46c0d57c4f25038"
+source = "git+https://github.com/helium/proto?branch=master#7a137324fc41b415a9df44558954683233a95239"
 dependencies = [
  "bytes",
  "prost",
@@ -3268,7 +3316,7 @@ checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 [[package]]
 name = "poc-metrics"
 version = "0.1.0"
-source = "git+https://github.com/helium/oracles?branch=main#c5968c1e9196b7e255436328c33e93be729aa280"
+source = "git+https://github.com/helium/oracles?branch=main#097f0c4a850efeb63076e9d3bbbd215ec0092fae"
 dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
@@ -3512,6 +3560,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ea8c51b5dc1d8e5fd3350ec8167f464ec0995e79f2e90a075b63371500d557f"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "combine",
+ "futures-util",
+ "itoa",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3619,6 +3687,12 @@ dependencies = [
  "web-sys",
  "winreg",
 ]
+
+[[package]]
+name = "retain_mut"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "retainer"
@@ -3935,6 +4009,12 @@ dependencies = [
  "cpufeatures",
  "digest 0.10.7",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae1a47186c03a32177042e55dbc5fd5aee900b8e0069a8d70fba96a9375cd012"
 
 [[package]]
 name = "sha2"

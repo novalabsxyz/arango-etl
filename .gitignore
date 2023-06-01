@@ -1,6 +1,7 @@
 settings.toml
 target/
 arangodb-data
+redis-data
 arangodb-apps-data
 *log
 *.log

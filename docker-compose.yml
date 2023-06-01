@@ -15,3 +15,13 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+  redis:
+    image: redis:latest
+    depends_on:
+      - arangodb
+    container_name: redis-instance
+    volumes:
+      - ./redis-data:/data
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
