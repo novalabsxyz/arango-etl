@@ -32,3 +32,5 @@ vincenty-core = "1.0.0"
 triggered = "0"
 futures-util = "0.3.28"
 tokio-graceful-shutdown = "0.12.1"
+redis = { version = "0", features = [ "streams", "aio", "tokio-comp" ] }
+deadpool-redis = { version = "0", features = [ "rt_tokio_1" ] }

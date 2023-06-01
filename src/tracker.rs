@@ -4,7 +4,6 @@ use chrono::{DateTime, Duration, Utc};
 use tokio::time;
 use tokio_graceful_shutdown::SubsystemHandle;
 
-#[derive(Debug)]
 pub struct Tracker {
     after_utc: DateTime<Utc>,
     interval_duration: Duration,
@@ -32,19 +31,11 @@ pub async fn run(mut tracker: Tracker, subsys: SubsystemHandle) -> Result<()> {
                 break;
             }
             _ = trigger.tick() => {
-                let previous_utc = tracker.after_utc;
-                let mut next_utc = previous_utc.checked_add_signed(tracker.interval_duration).context("failed to get next_utc")?;
-                tracing::info!("start processing next tick for {:?}", next_utc);
-                if let Ok(max_ts) = tracker.arangodb_handler.process(next_utc, None).await {
-                    tracing::info!("max_ts {:?}", max_ts);
-                    if max_ts >= next_utc {
-                        next_utc = max_ts;
-                    }
-                }
-
-                tracker.after_utc = next_utc;
-                tracing::info!("done processing for {:?}", next_utc);
-                tracing::info!("scheduling next tick for {:?}", next_utc.checked_add_signed(tracker.interval_duration));
+                let max_ts = tracker.arangodb_handler.process(tracker.after_utc, None).await?;
+                let next_utc = tracker.after_utc.checked_add_signed(tracker.interval_duration).context("failed to add interval")?;
+                tracing::info!("start processing next tick @ {:?}", next_utc);
+                tracker.after_utc = max_ts;
+                tracing::info!("scheduling next tick @ {:?} for ts: {:?}", next_utc, max_ts);
             }
         }
     }

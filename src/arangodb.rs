@@ -1,13 +1,16 @@
 use crate::settings::ArangoDBSettings;
 use anyhow::Result;
 use arangors::{
-    document::options::InsertOptions,
+    document::options::{InsertOptions, UpdateOptions},
     index::{Index, IndexSettings},
     uclient::reqwest::ReqwestClient,
-    ClientError, Collection, Connection, Database,
+    ClientError, Collection, Connection, Database, Document,
 };
 use base64::{engine::general_purpose, Engine as _};
-use file_store::iot_valid_poc::{IotPoc, IotValidBeaconReport, IotVerifiedWitnessReport};
+use file_store::{
+    iot_valid_poc::{IotPoc, IotValidBeaconReport, IotVerifiedWitnessReport},
+    FileInfo,
+};
 use h3ron::{FromH3Index, H3Cell, ToCoordinate};
 use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::LoraPocV1;
@@ -136,12 +139,13 @@ impl DB {
         Ok(db)
     }
 
-    pub async fn init_files(&self, keys: &[String]) -> Result<()> {
-        for key in keys {
-            let doc = json!({"_key": key, "done": false});
+    pub async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
+        for file in files {
+            let doc =
+                json!({"_key": file.key, "size": file.size, "ts": file.timestamp, "done": false });
             self.insert_document(&self.files, doc, "file", InsertOptions::builder().build())
                 .await?;
-            tracing::info!("init file: {:?}", key);
+            tracing::info!("init file: {:?}", file.key);
         }
 
         Ok(())
@@ -149,18 +153,28 @@ impl DB {
 
     pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
         for key in keys {
-            let doc = json!({"_key": key, "done": true});
-            self.insert_document(
-                &self.files,
-                doc,
-                "file",
-                InsertOptions::builder().overwrite(true).build(),
-            )
-            .await?;
+            let update_doc = json!({"done": true});
+            self.files
+                .update_document(
+                    key,
+                    update_doc,
+                    UpdateOptions::builder().merge_objects(true).build(),
+                )
+                .await?;
             tracing::info!("completed file: {:?}", key);
         }
 
         Ok(())
+    }
+
+    pub async fn get_file(&self, key: &str) -> Result<Option<Document<serde_json::Value>>> {
+        match self.files.document(key).await {
+            Ok(doc) => Ok(Some(doc)),
+            Err(err) => match err {
+                ClientError::Arango(ae) if ae.error_num() == 1202 => Ok(None),
+                _ => Err(err.into()),
+            },
+        }
     }
 
     async fn populate_hotspot(
@@ -302,13 +316,14 @@ impl DB {
         Ok(witness_json)
     }
 
-    pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<()> {
+    pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<Option<String>> {
         let iot_poc = IotPoc::try_from(dec_msg)?;
         let enc_poc_id = general_purpose::URL_SAFE_NO_PAD.encode(iot_poc.poc_id);
         let beacon_loc = iot_poc.beacon_report.location;
 
         if iot_poc.selected_witnesses.is_empty() {
-            return Ok(());
+            tracing::debug!("ignored, no witnesses");
+            return Ok(None);
         }
 
         // populate the beaconer in hotspots collection
@@ -364,7 +379,7 @@ impl DB {
             witnesses.len()
         );
 
-        Ok(())
+        Ok(Some(enc_poc_id))
     }
 }
 

@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RedisSettings {
+    /// redis endpoint, default: redis://localhost:6739
+    #[serde(default = "default_redis_endpoint")]
+    pub endpoint: String,
+    /// redis connection pool size, default: 16
+    #[serde(default = "default_redis_pool_size")]
+    pub pool_size: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TrackerSettings {
     /// Tick interval (secs). Default = 10s.
     #[serde(default = "default_interval")]
@@ -40,6 +50,8 @@ pub struct Settings {
     pub arangodb: ArangoDBSettings,
     // Configure current tracker settings
     pub tracker: TrackerSettings,
+    // Configure redis settings
+    pub redis: RedisSettings,
 }
 
 pub fn default_num_loaders() -> usize {
@@ -56,6 +68,14 @@ pub fn default_interval() -> i64 {
 
 pub fn default_log() -> String {
     "arango_etl=debug".to_string()
+}
+
+pub fn default_redis_pool_size() -> usize {
+    16
+}
+
+pub fn default_redis_endpoint() -> String {
+    "redis://localhost:6739".to_string()
 }
 
 pub fn default_arangodb_endpoint() -> String {
