@@ -1,4 +1,4 @@
-use crate::{arangodb_handler::ArangodbHandler, settings::Settings};
+use crate::{handler::ArangodbHandler, settings::Settings};
 use anyhow::Result;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

@@ -20,6 +20,7 @@ services:
     depends_on:
       - arangodb
     container_name: redis-instance
+    restart: always
     volumes:
       - ./redis-data:/data
     command: redis-server --appendonly yes
