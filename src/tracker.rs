@@ -1,4 +1,4 @@
-use crate::{arangodb_handler::ArangodbHandler, settings::Settings};
+use crate::{handler::ArangodbHandler, settings::Settings};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use tokio::time;

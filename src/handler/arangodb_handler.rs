@@ -1,4 +1,7 @@
-use crate::{arangodb::DB, redis_handler::RedisHandler, settings::Settings};
+use crate::{
+    handler::{arangodb::DB, RedisHandler},
+    settings::Settings,
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use file_store::{FileInfo, FileStore, FileType};

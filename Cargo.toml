@@ -14,17 +14,12 @@ serde =  {version = "1", features=["derive"]}
 serde_json = { version = "1", features = [ "std"] }
 tokio = { version = "1", features = ["macros"] }
 tokio-util = "0"
-arrow = "39.0.0"
-aws-sdk-s3 = "0.27.0"
 env_logger = "0.10.0"
 clap = {version = "4.2.7", features = ["derive"]}
 config = {version="0", default-features=false, features=["toml"]}
 tracing = "0"
 tracing-subscriber = { version = "0", default-features=false, features = ["env-filter", "registry", "fmt"] }
-http = "*"
 thiserror = "1"
-lazy_static = "1.4.0"
-async-trait = "0.1.68"
 arangors = "0.5.3"
 base64 = "0.21.0"
 h3ron = "0.17.0"
@@ -34,3 +29,4 @@ futures-util = "0.3.28"
 tokio-graceful-shutdown = "0.12.1"
 redis = { version = "0", features = [ "streams", "aio", "tokio-comp" ] }
 deadpool-redis = { version = "0", features = [ "rt_tokio_1" ] }
+rust_decimal = "1"
