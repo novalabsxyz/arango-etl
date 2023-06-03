@@ -1,8 +1,8 @@
 use crate::document::{Beacon, Witness};
 use anyhow::Result;
+use h3o::LatLng;
 use helium_crypto::PublicKeyBinary;
 use serde::{Deserialize, Serialize};
-use vincenty_core::distance_from_points;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Edge {
@@ -48,7 +48,11 @@ fn calc_distance(
     witness_lng: Option<f64>,
 ) -> Result<Option<f64>> {
     match (beacon_lat, beacon_lng, witness_lat, witness_lng) {
-        (Some(x1), Some(y1), Some(x2), Some(y2)) => Ok(Some(distance_from_points(x1, y1, x2, y2)?)),
+        (Some(x1), Some(y1), Some(x2), Some(y2)) => {
+            let c1 = LatLng::new(x1, y1)?;
+            let c2 = LatLng::new(x2, y2)?;
+            Ok(Some(c1.distance_km(c2)))
+        }
         _ => Ok(None),
     }
 }
