@@ -51,7 +51,7 @@ pub struct Settings {
     // Configure current tracker settings
     pub tracker: TrackerSettings,
     // Configure redis settings
-    pub redis: RedisSettings,
+    pub redis: Option<RedisSettings>,
 }
 
 pub fn default_num_loaders() -> usize {

@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 pub struct ArangodbHandler {
     store: FileStore,
     db: Arc<DB>,
-    redis_handler: Arc<RedisHandler>,
+    redis_handler: Arc<Option<RedisHandler>>,
     max_ingest: usize,
     num_loaders: usize,
 }
@@ -21,7 +21,13 @@ pub struct ArangodbHandler {
 impl ArangodbHandler {
     pub async fn new(settings: &Settings) -> Result<Self> {
         let store = FileStore::from_settings(&settings.ingest).await?;
-        let redis_handler = Arc::new(RedisHandler::from_settings(settings).await?);
+
+        let redis_handler = if let Some(rh) = &settings.redis {
+            Arc::new(Some(RedisHandler::from_settings(rh)?))
+        } else {
+            Arc::new(None)
+        };
+
         let max_ingest = settings.max_ingest;
         let num_loaders = settings.num_loaders;
         let db = Arc::new(DB::from_settings(&settings.arangodb).await?);
@@ -126,14 +132,15 @@ impl ArangodbHandler {
             match msg {
                 Err(err) => tracing::warn!("skipping entry in stream: {err:?}"),
                 Ok(buf) => {
-                    let db = Arc::clone(&self.db);
-                    let rh = Arc::clone(&self.redis_handler);
+                    let db = self.db.clone();
+                    let rh = self.redis_handler.clone();
                     set.spawn(async move {
                         match LoraPocV1::decode(buf) {
-                            Ok(dec_msg) => match db.populate_collections(dec_msg).await {
-                                Err(e) => tracing::error!("error populating collections: {:?}", e),
-                                Ok(None) => (),
-                                Ok(Some(poc_id)) => {
+                            Ok(dec_msg) => match (db.populate_collections(dec_msg).await, &*rh) {
+                                (Err(e), _) => {
+                                    tracing::error!("error populating collections: {:?}", e)
+                                }
+                                (Ok(Some(poc_id)), Some(rh)) => {
                                     tracing::debug!("storing poc_id: {:?} in redis", poc_id);
                                     if let Err(e) = rh.xadd("poc_id", &poc_id).await {
                                         tracing::error!(
@@ -143,6 +150,7 @@ impl ArangodbHandler {
                                         );
                                     }
                                 }
+                                _ => (),
                             },
                             Err(e) => {
                                 tracing::error!("error decoding message: {:?}", e);
