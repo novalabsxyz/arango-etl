@@ -1,6 +1,7 @@
 pub mod beacon;
 pub mod edge;
 pub mod hotspot;
+pub mod iot_poc_file;
 pub mod witness;
 
 pub use beacon::Beacon;

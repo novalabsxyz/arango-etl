@@ -1,5 +1,5 @@
 use crate::{
-    document::{Beacon, Edge, Hotspot},
+    document::{iot_poc_file::IotPocFile, Beacon, Edge, Hotspot},
     settings::ArangoDBSettings,
 };
 use anyhow::Result;
@@ -67,8 +67,8 @@ impl DB {
 
     pub async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
         for file in files {
-            let doc =
-                json!({"_key": file.key, "size": file.size, "ts": file.timestamp, "done": false });
+            let iot_poc_file = IotPocFile::from(file);
+            let doc = serde_json::to_value(iot_poc_file)?;
             self.insert_document(
                 &self.collections.files,
                 doc,
@@ -222,6 +222,8 @@ impl DB {
     }
 }
 
+// Helper functions
+
 async fn create_new_db_and_collections(inner: &ArangoDatabase) -> Result<Collections> {
     let collections = Collections {
         beacons: inner.create_collection(BEACON_COLLECTION).await?,
@@ -247,6 +249,41 @@ async fn use_existing_db_and_collections(inner: &ArangoDatabase) -> Result<Colle
 }
 
 async fn create_indices(inner: &ArangoDatabase) -> Result<()> {
+    create_beacon_indices(inner).await?;
+    create_file_indices(inner).await?;
+    create_witnes_indices(inner).await?;
+    Ok(())
+}
+
+async fn create_file_indices(inner: &ArangoDatabase) -> Result<()> {
+    let file_ts_skiplist_index = Index::builder()
+        .name("file_ts")
+        .fields(vec!["unix_ts".to_string()])
+        .settings(IndexSettings::Skiplist {
+            unique: false,
+            sparse: true,
+            deduplicate: false,
+        })
+        .build();
+    let file_size_skiplist_index = Index::builder()
+        .name("file_size")
+        .fields(vec!["size".to_string()])
+        .settings(IndexSettings::Skiplist {
+            unique: false,
+            sparse: true,
+            deduplicate: false,
+        })
+        .build();
+    inner
+        .create_index(FILES_COLLECTION, &file_ts_skiplist_index)
+        .await?;
+    inner
+        .create_index(FILES_COLLECTION, &file_size_skiplist_index)
+        .await?;
+    Ok(())
+}
+
+async fn create_beacon_indices(inner: &ArangoDatabase) -> Result<()> {
     let beacon_pub_key_hash_index = Index::builder()
         .name("beacon_pub_key")
         .fields(vec!["pub_key".to_string()])
@@ -265,6 +302,16 @@ async fn create_indices(inner: &ArangoDatabase) -> Result<()> {
             deduplicate: false,
         })
         .build();
+    inner
+        .create_index(BEACON_COLLECTION, &beacon_pub_key_hash_index)
+        .await?;
+    inner
+        .create_index(BEACON_COLLECTION, &beacon_ingest_skiplist_index)
+        .await?;
+    Ok(())
+}
+
+async fn create_witnes_indices(inner: &ArangoDatabase) -> Result<()> {
     let witness_count_index = Index::builder()
         .name("witness_count")
         .fields(vec!["count".to_string()])
@@ -283,12 +330,6 @@ async fn create_indices(inner: &ArangoDatabase) -> Result<()> {
             deduplicate: false,
         })
         .build();
-    inner
-        .create_index(BEACON_COLLECTION, &beacon_pub_key_hash_index)
-        .await?;
-    inner
-        .create_index(BEACON_COLLECTION, &beacon_ingest_skiplist_index)
-        .await?;
     inner
         .create_index(WITNESS_EDGE_COLLECTION, &witness_count_index)
         .await?;

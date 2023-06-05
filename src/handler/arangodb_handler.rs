@@ -44,7 +44,8 @@ impl ArangodbHandler {
 
         let ft = FileType::IotPoc;
         let file_list = self.store.list_all(ft, after_ts, before_ts).await?;
-        tracing::info!("all files: {:#?}", file_list);
+        let all_files = file_list.len();
+        tracing::info!("all files: {:#?}", all_files);
 
         if file_list.is_empty() {
             tracing::info!("no available ingest files of type {ft}");
@@ -52,7 +53,9 @@ impl ArangodbHandler {
         }
 
         let file_list = self.remove_done_files(file_list).await?;
-        tracing::info!("not done files: {:#?}", file_list);
+        let considered_files = file_list.len();
+        tracing::info!("not done files: {:#?}", considered_files);
+        tracing::info!("ignored files: {:#?}", all_files - considered_files);
 
         // Set max_ts to the file with the highest timestamp
         let mut max_ts = after_ts;
@@ -113,10 +116,9 @@ impl ArangodbHandler {
 
     /// Process necessary files
     async fn process_files(&self, file_list: Vec<FileInfo>) -> Result<()> {
-        let mut stream = self.store.source_unordered(
-            self.num_loaders,
-            stream::iter(file_list.clone()).map(Ok).boxed(),
-        );
+        let mut stream = self
+            .store
+            .source_unordered(self.num_loaders, stream::iter(file_list).map(Ok).boxed());
 
         let mut set = JoinSet::new();
 
