@@ -3,6 +3,7 @@ use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use file_store::iot_valid_poc::IotPoc;
+use h3o::LatLng;
 use helium_crypto::PublicKeyBinary;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,23 @@ pub struct Beacon {
     pub timestamp: DateTime<Utc>,
     pub tmst: u32,
     pub witnesses: Witnesses,
+}
+
+impl Beacon {
+    pub fn set_distance_for_witnesses(&mut self) -> Result<()> {
+        // attach distance to each witness in the beacon
+        for mut witness in self.witnesses.iter_mut() {
+            let distance = calc_distance(
+                self.latitude,
+                self.longitude,
+                witness.latitude,
+                witness.longitude,
+            )?
+            .unwrap_or_default();
+            witness.distance = distance
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<&IotPoc> for Beacon {
@@ -60,5 +78,21 @@ impl TryFrom<&IotPoc> for Beacon {
             elevation: beacon_report.elevation,
             witnesses: Witnesses::try_from(iot_poc)?,
         })
+    }
+}
+
+fn calc_distance(
+    beacon_lat: Option<f64>,
+    beacon_lng: Option<f64>,
+    witness_lat: Option<f64>,
+    witness_lng: Option<f64>,
+) -> Result<Option<f64>> {
+    match (beacon_lat, beacon_lng, witness_lat, witness_lng) {
+        (Some(x1), Some(y1), Some(x2), Some(y2)) => {
+            let c1 = LatLng::new(x1, y1)?;
+            let c2 = LatLng::new(x2, y2)?;
+            Ok(Some(c1.distance_km(c2)))
+        }
+        _ => Ok(None),
     }
 }

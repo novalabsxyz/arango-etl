@@ -1,5 +1,5 @@
 use crate::settings::Settings;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use deadpool_redis::{redis::AsyncCommands, Config, Pool, Runtime};
 
 pub struct RedisHandler {
@@ -16,19 +16,10 @@ impl RedisHandler {
         Ok(Self { pool })
     }
 
-    pub async fn xadd(&self, stream_name: &str, poc_id: &str) -> Result<()> {
+    pub async fn xadd(&self, stream_name: &str, poc_id: &str) -> Result<String> {
         let mut conn = self.pool.get().await?;
-        if let Err(e) = conn
-            .xadd::<_, _, _, String, String>(stream_name, "*", &[(&poc_id, "done".to_string())])
+        conn.xadd(stream_name, "*", &[(&poc_id, "done".to_string())])
             .await
-        {
-            tracing::error!(
-                "failed to store poc_id {:?} in redis, error: {:?}",
-                poc_id,
-                e
-            );
-            return Err(e.into());
-        }
-        Ok(())
+            .map_err(Error::from)
     }
 }
