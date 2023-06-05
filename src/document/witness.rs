@@ -6,7 +6,7 @@ use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::{InvalidParticipantSide, InvalidReason, VerificationStatus};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Witness {
@@ -29,6 +29,7 @@ pub struct Witness {
     pub snr: i32,
     pub frequency: u64,
     pub selected: bool,
+    pub distance: f64,
 }
 
 impl TryFrom<&IotVerifiedWitnessReport> for Witness {
@@ -59,7 +60,8 @@ impl TryFrom<&IotVerifiedWitnessReport> for Witness {
             participant_side: witness_report.participant_side,
             signal: witness_report.report.signal,
             snr: witness_report.report.snr,
-            selected: false,
+            selected: false, // default on init
+            distance: 0.0,   // default on init
         })
     }
 }
@@ -72,6 +74,12 @@ impl Deref for Witnesses {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Witnesses {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

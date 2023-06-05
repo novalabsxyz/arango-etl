@@ -1,6 +1,5 @@
 use crate::document::{Beacon, Witness};
 use anyhow::Result;
-use h3o::LatLng;
 use helium_crypto::PublicKeyBinary;
 use serde::{Deserialize, Serialize};
 
@@ -18,13 +17,6 @@ pub struct Edge {
 impl Edge {
     pub fn new(beacon: &Beacon, witness: &Witness) -> Result<Self> {
         let _key = witness_edge_key(beacon.location, witness.location);
-        let distance = calc_distance(
-            beacon.latitude,
-            beacon.longitude,
-            witness.latitude,
-            witness.longitude,
-        )?
-        .unwrap_or_default();
         let ingest_latency = witness
             .ingest_time_unix
             .checked_sub(beacon.ingest_time_unix)
@@ -35,25 +27,9 @@ impl Edge {
             witness_pub_key: witness.pub_key.clone(),
             witness_snr: witness.snr,
             witness_signal: witness.signal,
-            distance,
+            distance: witness.distance,
             ingest_latency,
         })
-    }
-}
-
-fn calc_distance(
-    beacon_lat: Option<f64>,
-    beacon_lng: Option<f64>,
-    witness_lat: Option<f64>,
-    witness_lng: Option<f64>,
-) -> Result<Option<f64>> {
-    match (beacon_lat, beacon_lng, witness_lat, witness_lng) {
-        (Some(x1), Some(y1), Some(x2), Some(y2)) => {
-            let c1 = LatLng::new(x1, y1)?;
-            let c2 = LatLng::new(x2, y2)?;
-            Ok(Some(c1.distance_km(c2)))
-        }
-        _ => Ok(None),
     }
 }
 

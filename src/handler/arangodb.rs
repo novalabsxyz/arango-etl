@@ -25,13 +25,18 @@ const FILES_COLLECTION: &str = "files";
 pub struct DB {
     pub conn: Connection,
     pub inner: ArangoDatabase,
-    // This collection will store beacon json (including a list of witnesses)
+    pub collections: Collections,
+}
+
+#[derive(Debug)]
+pub struct Collections {
+    // store beacon json (including a list of witnesses)
     pub beacons: ArangoCollection,
-    // This collection will just store all the pubkeys
+    // store all the hotspots (beacon + witness)
     pub hotspots: ArangoCollection,
-    // This collection will store all beacon-witness edges
+    // edge collection to store beacon -> witness information
     pub witnesses: ArangoCollection,
-    // This collection will store names of all processed iot-poc files
+    // store names of all processed (and in-process) iot-poc files
     pub files: ArangoCollection,
 }
 
@@ -42,96 +47,35 @@ impl DB {
                 .await?;
 
         let existing_databases = conn.accessible_databases().await?;
-        let db = if !existing_databases.contains_key(&settings.database) {
+
+        let (inner, collections) = if !existing_databases.contains_key(&settings.database) {
             let inner = conn.create_database(&settings.database).await?;
-            let beacons = inner.create_collection(BEACON_COLLECTION).await?;
-            let hotspots = inner.create_collection(HOTSPOT_COLLECTION).await?;
-            let files = inner.create_collection(FILES_COLLECTION).await?;
-            let witnesses = inner
-                .create_edge_collection(WITNESS_EDGE_COLLECTION)
-                .await?;
-
-            let beacon_pub_key_hash_index = Index::builder()
-                .name("beacon_pub_key")
-                .fields(vec!["pub_key".to_string()])
-                .settings(IndexSettings::Persistent {
-                    unique: false,
-                    sparse: false,
-                    deduplicate: false,
-                })
-                .build();
-            let beacon_ingest_skiplist_index = Index::builder()
-                .name("beacon_ingest_time")
-                .fields(vec!["ingest_time_unix".to_string()])
-                .settings(IndexSettings::Skiplist {
-                    unique: false,
-                    sparse: true,
-                    deduplicate: false,
-                })
-                .build();
-            let witness_count_index = Index::builder()
-                .name("witness_count")
-                .fields(vec!["count".to_string()])
-                .settings(IndexSettings::Persistent {
-                    unique: false,
-                    sparse: false,
-                    deduplicate: false,
-                })
-                .build();
-            let beacon_witness_distance_index = Index::builder()
-                .name("beacon_witness_distance")
-                .fields(vec!["distance".to_string()])
-                .settings(IndexSettings::Persistent {
-                    unique: false,
-                    sparse: false,
-                    deduplicate: false,
-                })
-                .build();
-            inner
-                .create_index(BEACON_COLLECTION, &beacon_pub_key_hash_index)
-                .await?;
-            inner
-                .create_index(BEACON_COLLECTION, &beacon_ingest_skiplist_index)
-                .await?;
-            inner
-                .create_index(WITNESS_EDGE_COLLECTION, &witness_count_index)
-                .await?;
-            inner
-                .create_index(WITNESS_EDGE_COLLECTION, &beacon_witness_distance_index)
-                .await?;
-
-            Self {
-                conn,
-                inner,
-                beacons,
-                hotspots,
-                witnesses,
-                files,
-            }
+            let cols = create_new_db_and_collections(&inner).await?;
+            (inner, cols)
         } else {
             let inner = conn.db(&settings.database).await?;
-            let beacons = inner.collection(BEACON_COLLECTION).await?;
-            let hotspots = inner.collection(HOTSPOT_COLLECTION).await?;
-            let files = inner.collection(FILES_COLLECTION).await?;
-            let witnesses = inner.collection(WITNESS_EDGE_COLLECTION).await?;
-            Self {
-                conn,
-                inner,
-                beacons,
-                hotspots,
-                witnesses,
-                files,
-            }
+            let cols = use_existing_db_and_collections(&inner).await?;
+            (inner, cols)
         };
-        Ok(db)
+
+        Ok(Self {
+            conn,
+            inner,
+            collections,
+        })
     }
 
     pub async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
         for file in files {
             let doc =
                 json!({"_key": file.key, "size": file.size, "ts": file.timestamp, "done": false });
-            self.insert_document(&self.files, doc, "file", InsertOptions::builder().build())
-                .await?;
+            self.insert_document(
+                &self.collections.files,
+                doc,
+                "file",
+                InsertOptions::builder().build(),
+            )
+            .await?;
             tracing::info!("init file: {:?}", file.key);
         }
 
@@ -141,7 +85,8 @@ impl DB {
     pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
         for key in keys {
             let update_doc = json!({"done": true});
-            self.files
+            self.collections
+                .files
                 .update_document(
                     key,
                     update_doc,
@@ -155,7 +100,7 @@ impl DB {
     }
 
     pub async fn get_file(&self, key: &str) -> Result<Option<Document<serde_json::Value>>> {
-        match self.files.document(key).await {
+        match self.collections.files.document(key).await {
             Ok(doc) => Ok(Some(doc)),
             Err(err) => match err {
                 ClientError::Arango(ae) if ae.error_num() == 1202 => Ok(None),
@@ -188,7 +133,7 @@ impl DB {
 
     async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<()> {
         self.insert_document(
-            &self.hotspots,
+            &self.collections.hotspots,
             serde_json::to_value(hotspot)?,
             "hotspot",
             InsertOptions::builder().build(),
@@ -199,7 +144,7 @@ impl DB {
 
     async fn populate_beacon(&self, beacon: Beacon) -> Result<()> {
         self.insert_document(
-            &self.beacons,
+            &self.collections.beacons,
             serde_json::to_value(beacon)?,
             "beacon",
             InsertOptions::builder().build(),
@@ -239,10 +184,8 @@ impl DB {
              "#
         ));
 
-        match self.inner.aql_str::<Vec<serde_json::Value>>(&query).await {
-            Ok(_) => tracing::debug!("successfully upserted edge"),
-            Err(e) => tracing::error!("error: {:?}", e),
-        }
+        self.inner.aql_str::<Vec<serde_json::Value>>(&query).await?;
+        tracing::debug!("successfully upserted edge");
         Ok(())
     }
 
@@ -255,10 +198,12 @@ impl DB {
             return Ok(None);
         }
 
-        let beacon = Beacon::try_from(&iot_poc)?;
+        let mut beacon = Beacon::try_from(&iot_poc)?;
+        beacon.set_distance_for_witnesses()?;
+
+        // insert beacon hotspot
         let poc_id = beacon.poc_id.clone();
         let beacon_hotspot = Hotspot::from(&beacon);
-        // insert beacon hotspot
         self.populate_hotspot(beacon_hotspot).await?;
 
         for witness in beacon.witnesses.iter() {
@@ -275,6 +220,82 @@ impl DB {
 
         Ok(Some(poc_id))
     }
+}
+
+async fn create_new_db_and_collections(inner: &ArangoDatabase) -> Result<Collections> {
+    let collections = Collections {
+        beacons: inner.create_collection(BEACON_COLLECTION).await?,
+        hotspots: inner.create_collection(HOTSPOT_COLLECTION).await?,
+        files: inner.create_collection(FILES_COLLECTION).await?,
+        witnesses: inner
+            .create_edge_collection(WITNESS_EDGE_COLLECTION)
+            .await?,
+    };
+
+    create_indices(inner).await?;
+
+    Ok(collections)
+}
+
+async fn use_existing_db_and_collections(inner: &ArangoDatabase) -> Result<Collections> {
+    Ok(Collections {
+        beacons: inner.collection(BEACON_COLLECTION).await?,
+        hotspots: inner.collection(HOTSPOT_COLLECTION).await?,
+        files: inner.collection(FILES_COLLECTION).await?,
+        witnesses: inner.collection(WITNESS_EDGE_COLLECTION).await?,
+    })
+}
+
+async fn create_indices(inner: &ArangoDatabase) -> Result<()> {
+    let beacon_pub_key_hash_index = Index::builder()
+        .name("beacon_pub_key")
+        .fields(vec!["pub_key".to_string()])
+        .settings(IndexSettings::Persistent {
+            unique: false,
+            sparse: false,
+            deduplicate: false,
+        })
+        .build();
+    let beacon_ingest_skiplist_index = Index::builder()
+        .name("beacon_ingest_time")
+        .fields(vec!["ingest_time_unix".to_string()])
+        .settings(IndexSettings::Skiplist {
+            unique: false,
+            sparse: true,
+            deduplicate: false,
+        })
+        .build();
+    let witness_count_index = Index::builder()
+        .name("witness_count")
+        .fields(vec!["count".to_string()])
+        .settings(IndexSettings::Persistent {
+            unique: false,
+            sparse: false,
+            deduplicate: false,
+        })
+        .build();
+    let beacon_witness_distance_index = Index::builder()
+        .name("beacon_witness_distance")
+        .fields(vec!["distance".to_string()])
+        .settings(IndexSettings::Persistent {
+            unique: false,
+            sparse: false,
+            deduplicate: false,
+        })
+        .build();
+    inner
+        .create_index(BEACON_COLLECTION, &beacon_pub_key_hash_index)
+        .await?;
+    inner
+        .create_index(BEACON_COLLECTION, &beacon_ingest_skiplist_index)
+        .await?;
+    inner
+        .create_index(WITNESS_EDGE_COLLECTION, &witness_count_index)
+        .await?;
+    inner
+        .create_index(WITNESS_EDGE_COLLECTION, &beacon_witness_distance_index)
+        .await?;
+    Ok(())
 }
 
 fn unindent(s: String) -> String {
