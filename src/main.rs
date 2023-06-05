@@ -1,6 +1,6 @@
 use anyhow::Result;
 use arango_etl::{
-    cli::{current, history},
+    cli::{current, history, rehydrate},
     settings::Settings,
 };
 use clap::Parser;
@@ -10,6 +10,8 @@ use std::path;
 pub enum Cmd {
     /// Run in historical data gathering mode
     History(history::Cmd),
+    /// Run in reyhdrate mode
+    Rehydrate(rehydrate::Cmd),
     /// Run in current mode by starting a server
     Current(current::Server),
 }
@@ -18,6 +20,7 @@ impl Cmd {
     pub async fn run(self, settings: Settings) -> Result<()> {
         match self {
             Self::History(cmd) => cmd.run(&settings).await,
+            Self::Rehydrate(cmd) => cmd.run(&settings).await,
             Self::Current(cmd) => cmd.run(&settings).await,
         }
     }
