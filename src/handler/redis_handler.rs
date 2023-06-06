@@ -1,4 +1,4 @@
-use crate::settings::Settings;
+use crate::settings::RedisSettings;
 use anyhow::{Error, Result};
 use deadpool_redis::{redis::AsyncCommands, Config, Pool, Runtime};
 
@@ -7,10 +7,10 @@ pub struct RedisHandler {
 }
 
 impl RedisHandler {
-    pub async fn from_settings(settings: &Settings) -> Result<Self> {
-        let pool = Config::from_url(&settings.redis.endpoint)
+    pub fn from_settings(settings: &RedisSettings) -> Result<Self> {
+        let pool = Config::from_url(&settings.endpoint)
             .builder()?
-            .max_size(settings.redis.pool_size)
+            .max_size(settings.pool_size)
             .runtime(Runtime::Tokio1)
             .build()?;
         Ok(Self { pool })
