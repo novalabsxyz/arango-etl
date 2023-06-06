@@ -28,4 +28,5 @@ tokio-graceful-shutdown = "0.12.1"
 redis = { version = "0", features = [ "streams", "aio", "tokio-comp" ] }
 deadpool-redis = { version = "0", features = [ "rt_tokio_1" ] }
 rust_decimal = "1"
-h3o = "0.3.2"
+h3o = { version = "0.3.2", features = [ "geo" ] }
+geojson = "0.24.1"

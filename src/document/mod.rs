@@ -10,16 +10,20 @@ pub use hotspot::Hotspot;
 pub use witness::{Witness, Witnesses};
 
 use anyhow::Result;
-use h3o::{CellIndex, LatLng};
+use geojson::Geometry;
+use h3o::{geom::ToGeo, CellIndex, LatLng};
 
-pub fn lat_lng_from_h3_index(location: Option<u64>) -> Result<(Option<f64>, Option<f64>)> {
+pub fn maybe_lat_lng_geo_from_h3(
+    location: Option<u64>,
+) -> Result<(Option<f64>, Option<f64>, Option<Geometry>)> {
     match location {
         Some(h3index) => {
             let cell = CellIndex::try_from(h3index)?;
             let latlng = LatLng::from(cell);
-            Ok((Some(latlng.lat()), Some(latlng.lng())))
+            let geom = cell.to_geojson()?;
+            Ok((Some(latlng.lat()), Some(latlng.lng()), Some(geom)))
         }
-        None => Ok((None, None)),
+        None => Ok((None, None, None)),
     }
 }
 
