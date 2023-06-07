@@ -1,4 +1,5 @@
 use crate::document::{Beacon, Witness};
+use geojson::Geometry;
 use helium_crypto::PublicKeyBinary;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +10,7 @@ pub struct Hotspot {
     location: Option<u64>,
     latitude: Option<f64>,
     longitude: Option<f64>,
+    geo: Option<Geometry>,
 }
 
 impl From<&Beacon> for Hotspot {
@@ -19,6 +21,7 @@ impl From<&Beacon> for Hotspot {
             location: beacon.location,
             latitude: beacon.latitude,
             longitude: beacon.longitude,
+            geo: beacon.geo.clone(),
         }
     }
 }
@@ -31,6 +34,7 @@ impl From<&Witness> for Hotspot {
             location: witness.location,
             latitude: witness.latitude,
             longitude: witness.longitude,
+            geo: witness.geo.clone(),
         }
     }
 }

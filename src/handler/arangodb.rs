@@ -252,6 +252,7 @@ async fn create_indices(inner: &ArangoDatabase) -> Result<()> {
     create_beacon_indices(inner).await?;
     create_file_indices(inner).await?;
     create_witnes_indices(inner).await?;
+    create_hotspot_indices(inner).await?;
     Ok(())
 }
 
@@ -302,11 +303,19 @@ async fn create_beacon_indices(inner: &ArangoDatabase) -> Result<()> {
             deduplicate: false,
         })
         .build();
+    let beacon_geo_index = Index::builder()
+        .name("beacon_geo_index")
+        .fields(vec!["geo".to_string()])
+        .settings(IndexSettings::Geo { geo_json: true })
+        .build();
     inner
         .create_index(BEACON_COLLECTION, &beacon_pub_key_hash_index)
         .await?;
     inner
         .create_index(BEACON_COLLECTION, &beacon_ingest_skiplist_index)
+        .await?;
+    inner
+        .create_index(BEACON_COLLECTION, &beacon_geo_index)
         .await?;
     Ok(())
 }
@@ -335,6 +344,18 @@ async fn create_witnes_indices(inner: &ArangoDatabase) -> Result<()> {
         .await?;
     inner
         .create_index(WITNESS_EDGE_COLLECTION, &beacon_witness_distance_index)
+        .await?;
+    Ok(())
+}
+
+async fn create_hotspot_indices(inner: &ArangoDatabase) -> Result<()> {
+    let hotspot_geo_index = Index::builder()
+        .name("hotspot_geo_index")
+        .fields(vec!["geo".to_string()])
+        .settings(IndexSettings::Geo { geo_json: true })
+        .build();
+    inner
+        .create_index(HOTSPOT_COLLECTION, &hotspot_geo_index)
         .await?;
     Ok(())
 }
