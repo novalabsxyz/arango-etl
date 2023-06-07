@@ -30,3 +30,4 @@ deadpool-redis = { version = "0", features = [ "rt_tokio_1" ] }
 rust_decimal = "1"
 h3o = { version = "0.3.2", features = [ "geo" ] }
 geojson = "0.24.1"
+angry-purple-tiger = "1.0.0"

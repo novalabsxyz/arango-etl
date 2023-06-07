@@ -203,7 +203,7 @@ impl DB {
 
         // insert beacon hotspot
         let poc_id = beacon.poc_id.clone();
-        let beacon_hotspot = Hotspot::from(&beacon);
+        let beacon_hotspot = Hotspot::try_from(&beacon)?;
         self.populate_hotspot(beacon_hotspot).await?;
 
         for witness in beacon.witnesses.iter() {
