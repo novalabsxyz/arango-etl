@@ -28,6 +28,16 @@ pub struct DB {
     pub collections: Collections,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DBError {
+    #[error("serde error")]
+    SerdeError(#[from] serde_json::Error),
+    #[error("arango client error")]
+    ArangoClientError(#[from] arangors::ClientError),
+    #[error("other error")]
+    Other(#[from] anyhow::Error),
+}
+
 #[derive(Debug)]
 pub struct Collections {
     // store beacon json (including a list of witnesses)
@@ -104,7 +114,7 @@ impl DB {
             Ok(doc) => Ok(Some(doc)),
             Err(err) => match err {
                 ClientError::Arango(ae) if ae.error_num() == 1202 => Ok(None),
-                _ => Err(err.into()),
+                _ => Err(DBError::Other(err.into()).into()),
             },
         }
     }
@@ -115,49 +125,46 @@ impl DB {
         doc: serde_json::Value,
         doc_name: &str,
         options: InsertOptions,
-    ) -> Result<()> {
+    ) -> Result<(), DBError> {
         match collection.create_document(doc, options).await {
             Ok(_) => {
                 tracing::debug!("successfully inserted {:?} document", doc_name);
                 Ok(())
             }
-            Err(err) => match err {
-                ClientError::Arango(ae) if ae.error_num() == 1210 => {
-                    tracing::warn!("unique constraint violation for {:?} doc", doc_name);
-                    Ok(())
-                }
-                ClientError::Arango(ae) if ae.error_num() == 1200 => {
-                    tracing::warn!("conflict detected for {:?} doc", doc_name);
-                    Ok(())
-                }
-                _ => Err(err.into()),
-            },
+            Err(ClientError::Arango(ae)) if [1210, 1200].contains(&ae.error_num()) => {
+                tracing::debug!(
+                    "error, doc: {:?}, {:?}: {:?}",
+                    doc_name,
+                    ae.error_num(),
+                    ae.message()
+                );
+                Ok(())
+            }
+            Err(err) => Err(DBError::ArangoClientError(err)),
         }
     }
 
-    async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<()> {
+    async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<(), DBError> {
         self.insert_document(
             &self.collections.hotspots,
             serde_json::to_value(hotspot)?,
             "hotspot",
             InsertOptions::builder().build(),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
-    async fn populate_beacon(&self, beacon: Beacon) -> Result<()> {
+    async fn populate_beacon(&self, beacon: Beacon) -> Result<(), DBError> {
         self.insert_document(
             &self.collections.beacons,
             serde_json::to_value(beacon)?,
             "beacon",
             InsertOptions::builder().build(),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
-    async fn populate_edge(&self, edge: Edge) -> Result<()> {
+    async fn populate_edge(&self, edge: Edge) -> Result<(), DBError> {
         let witness_edge_key = edge._key;
         let distance = edge.distance;
         let beacon_pub_key = edge.beacon_pub_key;
@@ -188,9 +195,12 @@ impl DB {
              "#
         ));
 
-        self.inner.aql_str::<Vec<serde_json::Value>>(&query).await?;
-        tracing::debug!("successfully upserted edge");
-        Ok(())
+        tracing::debug!("upserting edge");
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
     }
 
     pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<Option<String>> {
