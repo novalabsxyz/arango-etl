@@ -198,8 +198,7 @@ impl DB {
             return Ok(None);
         }
 
-        let mut beacon = Beacon::try_from(&iot_poc)?;
-        beacon.set_distance_for_witnesses()?;
+        let beacon = Beacon::try_from(&iot_poc)?;
 
         // insert beacon hotspot
         let poc_id = beacon.poc_id.clone();

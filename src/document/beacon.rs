@@ -33,7 +33,7 @@ pub struct Beacon {
 }
 
 impl Beacon {
-    pub fn set_distance_for_witnesses(&mut self) -> Result<()> {
+    fn set_witness_distance(&mut self) -> Result<()> {
         // attach distance to each witness in the beacon
         for mut witness in self.witnesses.iter_mut() {
             let distance = calc_distance(
@@ -59,8 +59,7 @@ impl TryFrom<&IotPoc> for Beacon {
         let beacon_ts = beacon_report.received_timestamp;
         let beacon_ingest_unix = beacon_ts.timestamp_millis();
         let (latitude, longitude, geo) = maybe_lat_lng_geo_from_h3(location)?;
-
-        Ok(Self {
+        let mut beacon = Self {
             _key: enc_poc_id.clone(),
             poc_id: enc_poc_id,
             ingest_time: beacon_ts,
@@ -80,7 +79,9 @@ impl TryFrom<&IotPoc> for Beacon {
             gain: beacon_report.gain,
             elevation: beacon_report.elevation,
             witnesses: Witnesses::try_from(iot_poc)?,
-        })
+        };
+        beacon.set_witness_distance()?;
+        Ok(beacon)
     }
 }
 
