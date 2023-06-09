@@ -123,7 +123,11 @@ impl DB {
             }
             Err(err) => match err {
                 ClientError::Arango(ae) if ae.error_num() == 1210 => {
-                    tracing::debug!("skipping already inserted {:?} doc", doc_name);
+                    tracing::warn!("unique constraint violation for {:?} doc", doc_name);
+                    Ok(())
+                }
+                ClientError::Arango(ae) if ae.error_num() == 1200 => {
+                    tracing::warn!("conflict detected for {:?} doc", doc_name);
                     Ok(())
                 }
                 _ => Err(err.into()),
