@@ -8,14 +8,15 @@ use file_store::{FileInfo, FileStore, FileType};
 use futures::stream::{self, StreamExt};
 use helium_proto::{services::poc_lora::LoraPocV1, Message};
 use std::sync::Arc;
-use tokio::task::JoinSet;
+use tokio::sync::Semaphore;
 
 pub struct ArangodbHandler {
     store: FileStore,
     db: Arc<DB>,
     redis_handler: Arc<Option<RedisHandler>>,
-    max_ingest: usize,
-    num_loaders: usize,
+    file_chunk_size: usize,
+    max_concurrent_files: usize,
+    max_processing_capacity: usize,
 }
 
 impl ArangodbHandler {
@@ -28,15 +29,14 @@ impl ArangodbHandler {
             Arc::new(None)
         };
 
-        let max_ingest = settings.max_ingest;
-        let num_loaders = settings.num_loaders;
         let db = Arc::new(DB::from_settings(&settings.arangodb).await?);
         Ok(Self {
             db,
             store,
             redis_handler,
-            max_ingest,
-            num_loaders,
+            file_chunk_size: settings.file_chunk_size,
+            max_concurrent_files: settings.max_concurrent_files,
+            max_processing_capacity: settings.max_processing_capacity,
         })
     }
 
@@ -49,127 +49,141 @@ impl ArangodbHandler {
         tracing::debug!("after_ts: {:?}", after_ts);
 
         let ft = FileType::IotPoc;
-        let file_list = self.store.list_all(ft, after_ts, before_ts).await?;
-        let all_files = file_list.len();
-        tracing::info!("all files: {:#?}", all_files);
+        let mut file_infos = self.store.list_all(ft, after_ts, before_ts).await?;
 
-        if file_list.is_empty() {
+        // return early if no files to process
+        if file_infos.is_empty() {
             tracing::info!("no available ingest files of type {ft}");
             return Ok(after_ts);
         }
 
-        let file_list = self.remove_done_files(file_list).await?;
-        let considered_files = file_list.len();
-        tracing::info!("not done files: {:#?}", considered_files);
-        tracing::info!("ignored files: {:#?}", all_files - considered_files);
+        self.exclude_done_files(&mut file_infos).await?;
+
+        // return early if all files are already processed
+        if file_infos.is_empty() {
+            tracing::info!("all {ft} files processed!");
+            return Ok(after_ts);
+        }
 
         // Set max_ts to the file with the highest timestamp
         let mut max_ts = after_ts;
-        for file_info in file_list.iter() {
+        for file_info in file_infos.iter() {
             if file_info.timestamp >= max_ts {
                 max_ts = file_info.timestamp
             }
         }
 
-        let keys: Vec<String> = file_list.iter().map(|fi| fi.key.clone()).collect();
-
-        self.init_files(&file_list).await?;
-        self.process_files(file_list).await?;
-        self.complete_files(&keys).await?;
+        self.process_files(file_infos).await?;
 
         Ok(max_ts)
     }
 
-    /// Filter out "done" files
-    async fn remove_done_files(&self, file_list: Vec<FileInfo>) -> Result<Vec<FileInfo>> {
-        let fl = stream::iter(file_list)
-            .filter_map(|file_info| {
-                let key = file_info.key.clone();
-                let db = Arc::clone(&self.db);
+    /// Exclude already done files
+    async fn exclude_done_files(&self, file_infos: &mut Vec<FileInfo>) -> Result<()> {
+        let before_len = file_infos.len();
+        tracing::info!("# all files: {:#?}", before_len);
 
-                async move {
-                    match db.get_file(&key).await {
-                        Ok(Some(doc))
-                            if doc.get("done").and_then(|v| v.as_bool()).unwrap_or(true) =>
-                        {
-                            tracing::info!("ignore already processed file: {:?}", key);
-                            None
-                        }
-                        Ok(_) => Some(file_info),
-                        Err(e) => {
-                            tracing::error!("error fetching file info from DB: {:?}", e);
-                            None
-                        }
-                    }
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
-        Ok(fl)
-    }
-
-    /// Initialize files being processed, done: false
-    async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
-        self.db.init_files(files).await?;
-        Ok(())
-    }
-
-    /// Mark files done processing, done: true
-    async fn complete_files(&self, keys: &[String]) -> Result<()> {
-        self.db.complete_files(keys).await?;
+        match self.db.get_done_file_keys().await {
+            Ok(done_file_keys) if !done_file_keys.is_empty() => {
+                tracing::info!("# done files: {:#?}", done_file_keys.len());
+                file_infos.retain(|fi| !done_file_keys.contains(&fi.key));
+                let after_len = file_infos.len();
+                tracing::info!("# not done files: {:#?}", after_len);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("ignoring error: {:?}", e);
+            }
+        }
         Ok(())
     }
 
     /// Process necessary files
-    async fn process_files(&self, file_list: Vec<FileInfo>) -> Result<()> {
-        let mut stream = self
-            .store
-            .source_unordered(self.num_loaders, stream::iter(file_list).map(Ok).boxed());
+    async fn process_files(&self, file_infos: Vec<FileInfo>) -> Result<()> {
+        if file_infos.is_empty() {
+            return Ok(());
+        }
 
-        let mut set = JoinSet::new();
+        let semaphore = Arc::new(Semaphore::new(self.max_processing_capacity));
 
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Err(err) => tracing::warn!("skipping entry in stream: {err:?}"),
-                Ok(buf) => {
-                    let db = self.db.clone();
-                    let rh = self.redis_handler.clone();
-                    set.spawn(async move {
-                        match LoraPocV1::decode(buf) {
-                            Ok(dec_msg) => match (db.populate_collections(dec_msg).await, &*rh) {
-                                (Err(e), _) => {
-                                    tracing::error!("error populating collections: {:?}", e)
-                                }
-                                (Ok(Some(poc_id)), Some(rh)) => {
-                                    tracing::debug!("storing poc_id: {:?} in redis", poc_id);
-                                    if let Err(e) = rh.xadd("poc_id", &poc_id).await {
-                                        tracing::error!(
-                                            "failed to store poc_id {:?} in redis, error: {:?}",
-                                            poc_id,
-                                            e
-                                        );
+        stream::iter(file_infos)
+            .for_each_concurrent(self.max_concurrent_files, |file_info| {
+                let semaphore = semaphore.clone();
+
+                async move {
+                    match semaphore.acquire().await {
+                        Ok(_permit) => {
+                            match self.process_file(file_info.clone()).await {
+                                Ok(()) => match self.db.complete_file(&file_info.key).await {
+                                    Ok(()) => {
+                                        tracing::info!("completed file ts: {}", file_info.timestamp)
                                     }
-                                }
-                                _ => (),
-                            },
-                            Err(e) => {
-                                tracing::error!("error decoding message: {:?}", e);
-                            }
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            "error completing file ts: {}, {err:?}",
+                                            file_info.timestamp
+                                        )
+                                    }
+                                },
+                                Err(err) => tracing::warn!(
+                                    "error while processing file ts: {}, err: {err:?}",
+                                    file_info.timestamp
+                                ),
+                            };
                         }
-                    });
-
-                    if set.len() > self.max_ingest {
-                        tracing::debug!("processing {} submissions", { self.max_ingest });
-                        set.join_next().await;
+                        Err(e) => {
+                            tracing::error!("Failed to acquire semaphore: {}", e);
+                        }
                     }
                 }
-            }
-        }
+            })
+            .await;
+        Ok(())
+    }
 
-        // Make sure the tasks are finished to completion even when we run out of stream items
-        while !set.is_empty() {
-            set.join_next().await;
-        }
+    /// Process individual file
+    async fn process_file(&self, file_info: FileInfo) -> Result<()> {
+        self.db.init_file(&file_info).await?;
+        self.store
+            .stream_file(file_info)
+            .await?
+            .chunks(self.file_chunk_size)
+            .for_each_concurrent(self.max_concurrent_files, |msgs| async move {
+                for msg in msgs {
+                    match msg {
+                        Err(err) => {
+                            tracing::warn!("skipping report of due to error {err:?}")
+                        }
+                        Ok(buf) => {
+                            let db = self.db.clone();
+                            let rh = self.redis_handler.clone();
+                            match LoraPocV1::decode(buf) {
+                                Ok(dec_msg) => match (db.populate_collections(dec_msg).await, &*rh)
+                                {
+                                    (Err(e), _) => {
+                                        tracing::error!("error populating collections: {:?}", e)
+                                    }
+                                    (Ok(Some(poc_id)), Some(rh)) => {
+                                        tracing::debug!("storing poc_id: {:?} in redis", poc_id);
+                                        if let Err(e) = rh.xadd("poc_id", &poc_id).await {
+                                            tracing::error!(
+                                                "failed to store poc_id {:?} in redis, error: {:?}",
+                                                poc_id,
+                                                e
+                                            );
+                                        }
+                                    }
+                                    _ => (),
+                                },
+                                Err(e) => {
+                                    tracing::error!("error decoding message: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .await;
         Ok(())
     }
 }

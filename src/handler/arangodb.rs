@@ -4,14 +4,13 @@ use crate::{
 };
 use anyhow::Result;
 use arangors::{
-    document::options::{InsertOptions, UpdateOptions},
+    document::options::InsertOptions,
     index::{Index, IndexSettings},
     uclient::reqwest::ReqwestClient,
-    ClientError, Collection, Connection, Database, Document,
+    ClientError, Collection, Connection, Database,
 };
 use file_store::{iot_valid_poc::IotPoc, FileInfo};
 use helium_proto::services::poc_lora::LoraPocV1;
-use serde_json::json;
 
 type ArangoCollection = Collection<ReqwestClient>;
 type ArangoDatabase = Database<ReqwestClient>;
@@ -75,48 +74,32 @@ impl DB {
         })
     }
 
-    pub async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
-        for file in files {
-            let iot_poc_file = IotPocFile::from(file);
-            let doc = serde_json::to_value(iot_poc_file)?;
-            self.insert_document(
-                &self.collections.files,
-                doc,
-                "file",
-                InsertOptions::builder().build(),
-            )
-            .await?;
-            tracing::info!("init file: {:?}", file.key);
-        }
-
-        Ok(())
+    pub async fn init_file(&self, file: &FileInfo) -> Result<(), DBError> {
+        tracing::info!("init file: {:?}", file.key);
+        let iot_poc_file = IotPocFile::from(file);
+        let doc = serde_json::to_value(iot_poc_file)?;
+        self.insert_document(
+            &self.collections.files,
+            doc,
+            "file",
+            InsertOptions::builder().build(),
+        )
+        .await
     }
 
-    pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
-        for key in keys {
-            let update_doc = json!({"done": true});
-            self.collections
-                .files
-                .update_document(
-                    key,
-                    update_doc,
-                    UpdateOptions::builder().merge_objects(true).build(),
-                )
-                .await?;
-            tracing::info!("completed file: {:?}", key);
-        }
-
-        Ok(())
+    pub async fn complete_file(&self, key: &str) -> Result<(), DBError> {
+        let query = format!(r#"UPDATE '{key}' WITH {{ done: true }} IN {FILES_COLLECTION}"#);
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
     }
 
-    pub async fn get_file(&self, key: &str) -> Result<Option<Document<serde_json::Value>>> {
-        match self.collections.files.document(key).await {
-            Ok(doc) => Ok(Some(doc)),
-            Err(err) => match err {
-                ClientError::Arango(ae) if ae.error_num() == 1202 => Ok(None),
-                _ => Err(DBError::Other(err.into()).into()),
-            },
-        }
+    pub async fn get_done_file_keys(&self) -> Result<Vec<String>, DBError> {
+        let query = r#"FOR f IN files FILTER f.done == true RETURN f._key"#;
+        let keys: Vec<String> = self.inner.aql_str(query).await?;
+        Ok(keys)
     }
 
     async fn insert_document(
