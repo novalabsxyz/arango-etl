@@ -47,6 +47,9 @@ pub struct Settings {
     // Configure max_processing_capacity (limit number of concurrent tasks)
     #[serde(default = "default_max_processing_capacity")]
     pub max_processing_capacity: usize,
+    // Configure max_retries for one poc file
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u8,
     // Configure ingest file store settings
     pub ingest: FSettings,
     // Configure arangodb settings
@@ -55,6 +58,10 @@ pub struct Settings {
     pub tracker: TrackerSettings,
     // Configure redis settings
     pub redis: Option<RedisSettings>,
+}
+
+pub fn default_max_retries() -> u8 {
+    3
 }
 
 pub fn default_num_loaders() -> usize {

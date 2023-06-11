@@ -102,6 +102,27 @@ impl DB {
         Ok(keys)
     }
 
+    pub async fn get_file_retries(&self, key: &str) -> Result<u8, DBError> {
+        let query =
+            format!(r#"FOR f in {FILES_COLLECTION} FILTER f._key == '{key}' RETURN f.retries"#);
+        let retries: Vec<u8> = self.inner.aql_str(&query).await?;
+        if retries.is_empty() {
+            Ok(0)
+        } else {
+            Ok(retries[0])
+        }
+    }
+
+    pub async fn increment_file_retry(&self, key: &str) -> Result<(), DBError> {
+        let query =
+            format!(r#"UPDATE '{key}' WITH {{ retries: OLD.retries + 1 }} IN {FILES_COLLECTION}"#);
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
+    }
+
     async fn insert_document(
         &self,
         collection: &ArangoCollection,

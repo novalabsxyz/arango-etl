@@ -9,6 +9,7 @@ pub struct IotPocFile {
     pub unix_ts: i64,
     pub size: usize,
     pub done: bool,
+    pub retries: u8,
 }
 
 impl From<&FileInfo> for IotPocFile {
@@ -19,6 +20,7 @@ impl From<&FileInfo> for IotPocFile {
             timestamp: fi.timestamp,
             unix_ts: fi.timestamp.timestamp_millis(),
             done: false,
+            retries: 0,
         }
     }
 }
