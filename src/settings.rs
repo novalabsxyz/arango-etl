@@ -39,7 +39,7 @@ pub struct Settings {
     #[serde(default = "default_log")]
     pub log: String,
     // Configure max_concurrent_files when sourcing iot-poc files from S3 bucket
-    #[serde(default = "default_num_loaders")]
+    #[serde(default = "default_max_concurrent_files")]
     pub max_concurrent_files: usize,
     // Configure file_chunk_size (number of pocs to ingest at a time)
     #[serde(default = "default_file_chunk_size")]
@@ -64,7 +64,7 @@ pub fn default_max_retries() -> u8 {
     3
 }
 
-pub fn default_num_loaders() -> usize {
+pub fn default_max_concurrent_files() -> usize {
     16
 }
 
