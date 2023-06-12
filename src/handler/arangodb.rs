@@ -4,14 +4,13 @@ use crate::{
 };
 use anyhow::Result;
 use arangors::{
-    document::options::{InsertOptions, UpdateOptions},
+    document::options::InsertOptions,
     index::{Index, IndexSettings},
     uclient::reqwest::ReqwestClient,
-    ClientError, Collection, Connection, Database, Document,
+    ClientError, Collection, Connection, Database,
 };
 use file_store::{iot_valid_poc::IotPoc, FileInfo};
 use helium_proto::services::poc_lora::LoraPocV1;
-use serde_json::json;
 
 type ArangoCollection = Collection<ReqwestClient>;
 type ArangoDatabase = Database<ReqwestClient>;
@@ -28,6 +27,16 @@ pub struct DB {
     pub collections: Collections,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DBError {
+    #[error("serde error")]
+    SerdeError(#[from] serde_json::Error),
+    #[error("arango client error")]
+    ArangoClientError(#[from] arangors::ClientError),
+    #[error("other error")]
+    Other(#[from] anyhow::Error),
+}
+
 #[derive(Debug)]
 pub struct Collections {
     // store beacon json (including a list of witnesses)
@@ -42,9 +51,12 @@ pub struct Collections {
 
 impl DB {
     pub async fn from_settings(settings: &ArangoDBSettings) -> Result<Self> {
-        let conn =
-            Connection::establish_jwt(&settings.endpoint, &settings.user, &settings.password)
-                .await?;
+        let conn = Connection::establish_basic_auth(
+            &settings.endpoint,
+            &settings.user,
+            &settings.password,
+        )
+        .await?;
 
         let existing_databases = conn.accessible_databases().await?;
 
@@ -65,48 +77,53 @@ impl DB {
         })
     }
 
-    pub async fn init_files(&self, files: &Vec<FileInfo>) -> Result<()> {
-        for file in files {
-            let iot_poc_file = IotPocFile::from(file);
-            let doc = serde_json::to_value(iot_poc_file)?;
-            self.insert_document(
-                &self.collections.files,
-                doc,
-                "file",
-                InsertOptions::builder().build(),
-            )
-            .await?;
-            tracing::info!("init file: {:?}", file.key);
-        }
-
-        Ok(())
+    pub async fn init_file(&self, file: &FileInfo) -> Result<(), DBError> {
+        tracing::info!("init file: {:?}", file.key);
+        let iot_poc_file = IotPocFile::from(file);
+        let doc = serde_json::to_value(iot_poc_file)?;
+        self.insert_document(
+            &self.collections.files,
+            doc,
+            "file",
+            InsertOptions::builder().build(),
+        )
+        .await
     }
 
-    pub async fn complete_files(&self, keys: &[String]) -> Result<()> {
-        for key in keys {
-            let update_doc = json!({"done": true});
-            self.collections
-                .files
-                .update_document(
-                    key,
-                    update_doc,
-                    UpdateOptions::builder().merge_objects(true).build(),
-                )
-                .await?;
-            tracing::info!("completed file: {:?}", key);
-        }
-
-        Ok(())
+    pub async fn complete_file(&self, key: &str) -> Result<(), DBError> {
+        let query = format!(r#"UPDATE '{key}' WITH {{ done: true }} IN {FILES_COLLECTION}"#);
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
     }
 
-    pub async fn get_file(&self, key: &str) -> Result<Option<Document<serde_json::Value>>> {
-        match self.collections.files.document(key).await {
-            Ok(doc) => Ok(Some(doc)),
-            Err(err) => match err {
-                ClientError::Arango(ae) if ae.error_num() == 1202 => Ok(None),
-                _ => Err(err.into()),
-            },
+    pub async fn get_done_file_keys(&self) -> Result<Vec<String>, DBError> {
+        let query = r#"FOR f IN files FILTER f.done == true RETURN f._key"#;
+        let keys: Vec<String> = self.inner.aql_str(query).await?;
+        Ok(keys)
+    }
+
+    pub async fn get_file_retries(&self, key: &str) -> Result<u8, DBError> {
+        let query =
+            format!(r#"FOR f in {FILES_COLLECTION} FILTER f._key == '{key}' RETURN f.retries"#);
+        let retries: Vec<u8> = self.inner.aql_str(&query).await?;
+        if retries.is_empty() {
+            Ok(0)
+        } else {
+            Ok(retries[0])
         }
+    }
+
+    pub async fn increment_file_retry(&self, key: &str) -> Result<(), DBError> {
+        let query =
+            format!(r#"UPDATE '{key}' WITH {{ retries: OLD.retries + 1 }} IN {FILES_COLLECTION}"#);
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
     }
 
     async fn insert_document(
@@ -115,45 +132,46 @@ impl DB {
         doc: serde_json::Value,
         doc_name: &str,
         options: InsertOptions,
-    ) -> Result<()> {
+    ) -> Result<(), DBError> {
         match collection.create_document(doc, options).await {
             Ok(_) => {
                 tracing::debug!("successfully inserted {:?} document", doc_name);
                 Ok(())
             }
-            Err(err) => match err {
-                ClientError::Arango(ae) if ae.error_num() == 1210 => {
-                    tracing::debug!("skipping already inserted {:?} doc", doc_name);
-                    Ok(())
-                }
-                _ => Err(err.into()),
-            },
+            Err(ClientError::Arango(ae)) if [1210, 1200].contains(&ae.error_num()) => {
+                tracing::debug!(
+                    "error, doc: {:?}, {:?}: {:?}",
+                    doc_name,
+                    ae.error_num(),
+                    ae.message()
+                );
+                Ok(())
+            }
+            Err(err) => Err(DBError::ArangoClientError(err)),
         }
     }
 
-    async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<()> {
+    async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<(), DBError> {
         self.insert_document(
             &self.collections.hotspots,
             serde_json::to_value(hotspot)?,
             "hotspot",
             InsertOptions::builder().build(),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
-    async fn populate_beacon(&self, beacon: Beacon) -> Result<()> {
+    async fn populate_beacon(&self, beacon: Beacon) -> Result<(), DBError> {
         self.insert_document(
             &self.collections.beacons,
             serde_json::to_value(beacon)?,
             "beacon",
             InsertOptions::builder().build(),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
-    async fn populate_edge(&self, edge: Edge) -> Result<()> {
+    async fn populate_edge(&self, edge: Edge) -> Result<(), DBError> {
         let witness_edge_key = edge._key;
         let distance = edge.distance;
         let beacon_pub_key = edge.beacon_pub_key;
@@ -184,9 +202,12 @@ impl DB {
              "#
         ));
 
-        self.inner.aql_str::<Vec<serde_json::Value>>(&query).await?;
-        tracing::debug!("successfully upserted edge");
-        Ok(())
+        tracing::debug!("upserting edge");
+        self.inner
+            .aql_str::<Vec<serde_json::Value>>(&query)
+            .await
+            .map(|_| ())
+            .map_err(DBError::from)
     }
 
     pub async fn populate_collections(&self, dec_msg: LoraPocV1) -> Result<Option<String>> {

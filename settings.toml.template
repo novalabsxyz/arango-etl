@@ -1,6 +1,8 @@
 log = "arango_etl=info"
-num_loaders = 16
-max_ingest = 32
+max_concurrent_files = 16
+file_chunk_size = 600
+max_processing_capacity = 32
+max_retries = 3
 
 [arangodb]
 endpoint = "http://localhost:8529"

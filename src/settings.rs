@@ -38,12 +38,18 @@ pub struct Settings {
     // Configure logging level = debug
     #[serde(default = "default_log")]
     pub log: String,
-    // Configure num of loaders for sourcing iot-poc files from S3 bucket
-    #[serde(default = "default_num_loaders")]
-    pub num_loaders: usize,
-    // Configure max ingest (number of messages to ingest into arangodb concurrently)
-    #[serde(default = "default_max_ingest")]
-    pub max_ingest: usize,
+    // Configure max_concurrent_files when sourcing iot-poc files from S3 bucket
+    #[serde(default = "default_max_concurrent_files")]
+    pub max_concurrent_files: usize,
+    // Configure file_chunk_size (number of pocs to ingest at a time)
+    #[serde(default = "default_file_chunk_size")]
+    pub file_chunk_size: usize,
+    // Configure max_processing_capacity (limit number of concurrent tasks)
+    #[serde(default = "default_max_processing_capacity")]
+    pub max_processing_capacity: usize,
+    // Configure max_retries for one poc file
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u8,
     // Configure ingest file store settings
     pub ingest: FSettings,
     // Configure arangodb settings
@@ -54,11 +60,19 @@ pub struct Settings {
     pub redis: Option<RedisSettings>,
 }
 
-pub fn default_num_loaders() -> usize {
+pub fn default_max_retries() -> u8 {
+    3
+}
+
+pub fn default_max_concurrent_files() -> usize {
     16
 }
 
-pub fn default_max_ingest() -> usize {
+pub fn default_file_chunk_size() -> usize {
+    600
+}
+
+pub fn default_max_processing_capacity() -> usize {
     32
 }
 
