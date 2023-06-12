@@ -51,9 +51,12 @@ pub struct Collections {
 
 impl DB {
     pub async fn from_settings(settings: &ArangoDBSettings) -> Result<Self> {
-        let conn =
-            Connection::establish_jwt(&settings.endpoint, &settings.user, &settings.password)
-                .await?;
+        let conn = Connection::establish_basic_auth(
+            &settings.endpoint,
+            &settings.user,
+            &settings.password,
+        )
+        .await?;
 
         let existing_databases = conn.accessible_databases().await?;
 

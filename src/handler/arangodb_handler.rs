@@ -111,8 +111,8 @@ impl ArangodbHandler {
         }
     }
 
-    // Filter failed files which have reached the max number of retries
-    // by querying the db for the number of retries for that file's key
+    /// Filter failed files which have reached the max number of retries
+    /// by querying the db for the number of retries for that file's key
     async fn filter_retry_exceeded_failed_files(
         &self,
         failed_files: Vec<FileInfo>,
