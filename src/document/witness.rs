@@ -1,4 +1,4 @@
-use crate::document::maybe_lat_lng_geo_from_h3;
+use crate::document::{get_name, maybe_lat_lng_geo_from_h3};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use file_store::iot_valid_poc::{IotPoc, IotVerifiedWitnessReport};
@@ -25,6 +25,7 @@ pub struct Witness {
     pub verification_status: VerificationStatus,
     pub participant_side: InvalidParticipantSide,
     pub pub_key: PublicKeyBinary,
+    pub name: String,
     pub timestamp: DateTime<Utc>,
     pub tmst: u32,
     pub signal: i32,
@@ -42,6 +43,7 @@ impl TryFrom<&IotVerifiedWitnessReport> for Witness {
         let witness_ts = witness_report.received_timestamp;
         let witness_ingest_unix = witness_ts.timestamp_millis();
         let (latitude, longitude, geo) = maybe_lat_lng_geo_from_h3(location)?;
+        let name = get_name(&witness_report.report.pub_key)?;
 
         Ok(Self {
             ingest_time: witness_ts,
@@ -50,6 +52,7 @@ impl TryFrom<&IotVerifiedWitnessReport> for Witness {
             latitude,
             longitude,
             geo,
+            name,
             hex_scale: witness_report.hex_scale.to_f64(),
             reward_unit: witness_report.reward_unit.to_f64(),
             pub_key: witness_report.report.pub_key.clone(),
