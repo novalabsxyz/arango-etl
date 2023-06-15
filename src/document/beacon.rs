@@ -1,4 +1,4 @@
-use crate::document::{maybe_lat_lng_geo_from_h3, Witnesses};
+use crate::document::{get_name, maybe_lat_lng_geo_from_h3, Witnesses};
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
@@ -24,6 +24,7 @@ pub struct Beacon {
     pub hex_scale: Option<f64>,
     pub reward_unit: Option<f64>,
     pub pub_key: PublicKeyBinary,
+    pub name: String,
     pub frequency: u64,
     pub channel: i32,
     pub tx_power: i32,
@@ -59,6 +60,8 @@ impl TryFrom<&IotPoc> for Beacon {
         let beacon_ts = beacon_report.received_timestamp;
         let beacon_ingest_unix = beacon_ts.timestamp_millis();
         let (latitude, longitude, geo) = maybe_lat_lng_geo_from_h3(location)?;
+        let name = get_name(&beacon_report.report.pub_key)?;
+
         let mut beacon = Self {
             _key: enc_poc_id.clone(),
             poc_id: enc_poc_id,
@@ -68,6 +71,7 @@ impl TryFrom<&IotPoc> for Beacon {
             latitude,
             longitude,
             geo,
+            name,
             hex_scale: beacon_report.hex_scale.to_f64(),
             reward_unit: beacon_report.reward_unit.to_f64(),
             pub_key: beacon_report.report.pub_key.clone(),

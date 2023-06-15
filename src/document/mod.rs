@@ -9,9 +9,11 @@ pub use edge::Edge;
 pub use hotspot::Hotspot;
 pub use witness::{Witness, Witnesses};
 
+use angry_purple_tiger::AnimalName;
 use anyhow::Result;
 use geojson::Geometry;
 use h3o::{geom::ToGeo, CellIndex, LatLng};
+use helium_crypto::PublicKeyBinary;
 
 pub fn maybe_lat_lng_geo_from_h3(
     location: Option<u64>,
@@ -25,6 +27,10 @@ pub fn maybe_lat_lng_geo_from_h3(
         }
         None => Ok((None, None, None)),
     }
+}
+
+pub fn get_name(pub_key: &PublicKeyBinary) -> Result<String> {
+    Ok(pub_key.to_string().parse::<AnimalName>()?.to_string())
 }
 
 #[cfg(test)]
