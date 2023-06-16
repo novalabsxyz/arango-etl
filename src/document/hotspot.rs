@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Hotspot {
-    _key: PublicKeyBinary,
+    pub _key: PublicKeyBinary,
+    pub poc_ids: Vec<String>,
     location: Option<u64>,
     latitude: Option<f64>,
     longitude: Option<f64>,
@@ -26,6 +27,7 @@ impl TryFrom<&Beacon> for Hotspot {
             longitude: beacon.longitude,
             geo: beacon.geo.clone(),
             name,
+            poc_ids: vec![beacon.poc_id.clone()],
         })
     }
 }
@@ -42,6 +44,7 @@ impl TryFrom<&Witness> for Hotspot {
             longitude: witness.longitude,
             geo: witness.geo.clone(),
             name,
+            poc_ids: vec![],
         })
     }
 }
