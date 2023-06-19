@@ -1,4 +1,8 @@
-use crate::document::{get_name, maybe_lat_lng_geo_from_h3, Witnesses};
+use crate::document::{
+    get_name,
+    loc_data::{LocData, ParentLocData},
+    Witnesses,
+};
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
@@ -19,6 +23,10 @@ pub struct Beacon {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub geo: Option<Geometry>,
+    pub parent_location: Option<u64>,
+    pub parent_latitude: Option<f64>,
+    pub parent_longitude: Option<f64>,
+    pub parent_geo: Option<Geometry>,
     pub gain: i32,
     pub elevation: i32,
     pub hex_scale: Option<f64>,
@@ -59,7 +67,8 @@ impl TryFrom<&IotPoc> for Beacon {
         let location = beacon_report.location;
         let beacon_ts = beacon_report.received_timestamp;
         let beacon_ingest_unix = beacon_ts.timestamp_millis();
-        let (latitude, longitude, geo) = maybe_lat_lng_geo_from_h3(location)?;
+        let loc_data = LocData::from_h3(location)?;
+        let parent_loc_data = ParentLocData::from_h3(location)?;
         let name = get_name(&beacon_report.report.pub_key)?;
 
         let mut beacon = Self {
@@ -68,9 +77,13 @@ impl TryFrom<&IotPoc> for Beacon {
             ingest_time: beacon_ts,
             ingest_time_unix: beacon_ingest_unix,
             location,
-            latitude,
-            longitude,
-            geo,
+            latitude: loc_data.lat,
+            longitude: loc_data.lng,
+            geo: loc_data.geo,
+            parent_location: parent_loc_data.loc,
+            parent_latitude: parent_loc_data.lat,
+            parent_longitude: parent_loc_data.lng,
+            parent_geo: parent_loc_data.geo,
             name,
             hex_scale: beacon_report.hex_scale.to_f64(),
             reward_unit: beacon_report.reward_unit.to_f64(),

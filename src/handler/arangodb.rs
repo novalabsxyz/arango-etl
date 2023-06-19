@@ -1,5 +1,8 @@
 use crate::{
-    document::{iot_poc_file::IotPocFile, Beacon, Edge, Hotspot},
+    document::{
+        iot_poc_file::IotPocFile, Beacon, Edge, Hotspot, BEACON_COLLECTION, FILES_COLLECTION,
+        HOTSPOT_COLLECTION, WITNESS_EDGE_COLLECTION,
+    },
     settings::ArangoDBSettings,
 };
 use anyhow::Result;
@@ -15,11 +18,6 @@ use helium_proto::services::poc_lora::LoraPocV1;
 
 type ArangoCollection = Collection<ReqwestClient>;
 type ArangoDatabase = Database<ReqwestClient>;
-
-const BEACON_COLLECTION: &str = "beacons";
-const HOTSPOT_COLLECTION: &str = "hotspots";
-const WITNESS_EDGE_COLLECTION: &str = "witnesses";
-const FILES_COLLECTION: &str = "files";
 
 #[derive(Debug)]
 pub struct DB {
@@ -447,6 +445,15 @@ async fn create_hotspot_indices(inner: &ArangoDatabase) -> Result<()> {
         .build();
     inner
         .create_index(HOTSPOT_COLLECTION, &hotspot_geo_index)
+        .await?;
+
+    let hotspot_parent_geo_index = Index::builder()
+        .name("hotspot_parent_geo_index")
+        .fields(vec!["parent_geo".to_string()])
+        .settings(IndexSettings::Geo { geo_json: true })
+        .build();
+    inner
+        .create_index(HOTSPOT_COLLECTION, &hotspot_parent_geo_index)
         .await?;
     Ok(())
 }

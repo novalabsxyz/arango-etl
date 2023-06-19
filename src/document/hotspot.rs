@@ -12,6 +12,10 @@ pub struct Hotspot {
     latitude: Option<f64>,
     longitude: Option<f64>,
     geo: Option<Geometry>,
+    parent_location: Option<u64>,
+    parent_latitude: Option<f64>,
+    parent_longitude: Option<f64>,
+    parent_geo: Option<Geometry>,
     name: String,
 }
 
@@ -26,6 +30,10 @@ impl TryFrom<&Beacon> for Hotspot {
             latitude: beacon.latitude,
             longitude: beacon.longitude,
             geo: beacon.geo.clone(),
+            parent_location: beacon.parent_location,
+            parent_latitude: beacon.parent_latitude,
+            parent_longitude: beacon.parent_longitude,
+            parent_geo: beacon.parent_geo.clone(),
             name,
             poc_ids: vec![beacon.poc_id.clone()],
         })
@@ -43,6 +51,10 @@ impl TryFrom<&Witness> for Hotspot {
             latitude: witness.latitude,
             longitude: witness.longitude,
             geo: witness.geo.clone(),
+            parent_location: witness.parent_location,
+            parent_latitude: witness.parent_latitude,
+            parent_longitude: witness.parent_longitude,
+            parent_geo: witness.parent_geo.clone(),
             name,
             poc_ids: vec![],
         })

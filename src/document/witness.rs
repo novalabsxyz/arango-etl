@@ -1,4 +1,7 @@
-use crate::document::{get_name, maybe_lat_lng_geo_from_h3};
+use crate::document::{
+    get_name,
+    loc_data::{LocData, ParentLocData},
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use file_store::iot_valid_poc::{IotPoc, IotVerifiedWitnessReport};
@@ -17,6 +20,10 @@ pub struct Witness {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub geo: Option<Geometry>,
+    pub parent_location: Option<u64>,
+    pub parent_latitude: Option<f64>,
+    pub parent_longitude: Option<f64>,
+    pub parent_geo: Option<Geometry>,
     pub gain: i32,
     pub elevation: i32,
     pub hex_scale: Option<f64>,
@@ -42,16 +49,21 @@ impl TryFrom<&IotVerifiedWitnessReport> for Witness {
         let location = witness_report.location;
         let witness_ts = witness_report.received_timestamp;
         let witness_ingest_unix = witness_ts.timestamp_millis();
-        let (latitude, longitude, geo) = maybe_lat_lng_geo_from_h3(location)?;
+        let loc_data = LocData::from_h3(location)?;
+        let parent_loc_data = ParentLocData::from_h3(location)?;
         let name = get_name(&witness_report.report.pub_key)?;
 
         Ok(Self {
             ingest_time: witness_ts,
             ingest_time_unix: witness_ingest_unix,
             location,
-            latitude,
-            longitude,
-            geo,
+            latitude: loc_data.lat,
+            longitude: loc_data.lng,
+            geo: loc_data.geo,
+            parent_location: parent_loc_data.loc,
+            parent_latitude: parent_loc_data.lat,
+            parent_longitude: parent_loc_data.lng,
+            parent_geo: parent_loc_data.geo,
             name,
             hex_scale: witness_report.hex_scale.to_f64(),
             reward_unit: witness_report.reward_unit.to_f64(),
