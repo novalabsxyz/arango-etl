@@ -18,7 +18,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Check
         run: cargo check --release
