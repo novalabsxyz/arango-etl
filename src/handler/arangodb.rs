@@ -10,6 +10,7 @@ use arangors::{
     ClientError, Collection, Connection, Database,
 };
 use file_store::{iot_valid_poc::IotPoc, FileInfo};
+use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::LoraPocV1;
 
 type ArangoCollection = Collection<ReqwestClient>;
@@ -49,6 +50,12 @@ pub struct Collections {
     pub files: ArangoCollection,
 }
 
+#[derive(Debug)]
+enum HotspotType {
+    Beacon,
+    Witness,
+}
+
 impl DB {
     pub async fn from_settings(settings: &ArangoDBSettings) -> Result<Self> {
         let conn = Connection::establish_basic_auth(
@@ -81,13 +88,18 @@ impl DB {
         tracing::info!("init file: {:?}", file.key);
         let iot_poc_file = IotPocFile::from(file);
         let doc = serde_json::to_value(iot_poc_file)?;
-        self.insert_document(
-            &self.collections.files,
-            doc,
-            "file",
-            InsertOptions::builder().build(),
-        )
-        .await
+
+        if !self.file_exists(&file.key).await? {
+            self.insert_document(
+                &self.collections.files,
+                doc,
+                "file",
+                InsertOptions::builder().build(),
+            )
+            .await
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn complete_file(&self, key: &str) -> Result<(), DBError> {
@@ -114,6 +126,28 @@ impl DB {
         } else {
             Ok(retries[0])
         }
+    }
+
+    pub async fn file_exists(&self, key: &str) -> Result<bool, DBError> {
+        let query =
+            format!(r#"FOR f IN {FILES_COLLECTION} FILTER f._key == "{key}" RETURN f._key"#);
+        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        Ok(!keys.is_empty())
+    }
+
+    pub async fn hotspot_exists(&self, pub_key: &PublicKeyBinary) -> Result<bool, DBError> {
+        let query = format!(
+            r#"FOR h IN {HOTSPOT_COLLECTION} FILTER h._key == "{pub_key}" RETURN h.pub_key"#
+        );
+        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        Ok(!keys.is_empty())
+    }
+
+    pub async fn beacon_exists(&self, poc_id: &str) -> Result<bool, DBError> {
+        let query =
+            format!(r#"FOR b IN {BEACON_COLLECTION} FILTER b._key == "{poc_id}" RETURN b.poc_id"#);
+        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        Ok(!keys.is_empty())
     }
 
     pub async fn increment_file_retry(&self, key: &str) -> Result<(), DBError> {
@@ -151,24 +185,59 @@ impl DB {
         }
     }
 
-    async fn populate_hotspot(&self, hotspot: Hotspot) -> Result<(), DBError> {
-        self.insert_document(
-            &self.collections.hotspots,
-            serde_json::to_value(hotspot)?,
-            "hotspot",
-            InsertOptions::builder().build(),
-        )
-        .await
+    async fn populate_hotspot(
+        &self,
+        hotspot_type: HotspotType,
+        hotspot: Hotspot,
+    ) -> Result<(), DBError> {
+        match hotspot_type {
+            HotspotType::Beacon => {
+                // Update the poc_ids for it if it exists, else insert new document
+                let query = unindent(format!(
+                    r#"
+                    UPSERT {{ _key: "{}" }}
+                    INSERT {}
+                    UPDATE {{ poc_ids: UNION_DISTINCT(OLD.poc_ids, ["{}"]) }}
+                    IN hotspots"#,
+                    hotspot._key,
+                    serde_json::to_value(&hotspot)?,
+                    hotspot.poc_ids[0]
+                ));
+                self.inner
+                    .aql_str::<Vec<serde_json::Value>>(&query)
+                    .await
+                    .map(|_| ())
+                    .map_err(DBError::from)
+            }
+            HotspotType::Witness => {
+                if !self.hotspot_exists(&hotspot._key).await? {
+                    // Just insert
+                    self.insert_document(
+                        &self.collections.hotspots,
+                        serde_json::to_value(hotspot)?,
+                        "hotspot",
+                        InsertOptions::builder().overwrite(false).build(),
+                    )
+                    .await
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
     async fn populate_beacon(&self, beacon: Beacon) -> Result<(), DBError> {
-        self.insert_document(
-            &self.collections.beacons,
-            serde_json::to_value(beacon)?,
-            "beacon",
-            InsertOptions::builder().build(),
-        )
-        .await
+        if !self.beacon_exists(&beacon._key).await? {
+            self.insert_document(
+                &self.collections.beacons,
+                serde_json::to_value(beacon)?,
+                "beacon",
+                InsertOptions::builder().build(),
+            )
+            .await
+        } else {
+            Ok(())
+        }
     }
 
     async fn populate_edge(&self, edge: Edge) -> Result<(), DBError> {
@@ -224,12 +293,14 @@ impl DB {
         // insert beacon hotspot
         let poc_id = beacon.poc_id.clone();
         let beacon_hotspot = Hotspot::try_from(&beacon)?;
-        self.populate_hotspot(beacon_hotspot).await?;
+        self.populate_hotspot(HotspotType::Beacon, beacon_hotspot)
+            .await?;
 
         for witness in beacon.witnesses.iter() {
             // insert witness hotspot
             let witness_hotspot = Hotspot::try_from(witness)?;
-            self.populate_hotspot(witness_hotspot).await?;
+            self.populate_hotspot(HotspotType::Witness, witness_hotspot)
+                .await?;
             // insert beacon -> witness edge
             let edge = Edge::new(&beacon, witness)?;
             self.populate_edge(edge).await?;
