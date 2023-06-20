@@ -10,11 +10,12 @@ use arangors::{
     document::options::InsertOptions,
     index::{Index, IndexSettings},
     uclient::reqwest::ReqwestClient,
-    ClientError, Collection, Connection, Database,
+    AqlQuery, ClientError, Collection, Connection, Database,
 };
 use file_store::{iot_valid_poc::IotPoc, FileInfo};
 use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::LoraPocV1;
+use serde_json::Value;
 
 type ArangoCollection = Collection<ReqwestClient>;
 type ArangoDatabase = Database<ReqwestClient>;
@@ -101,24 +102,42 @@ impl DB {
     }
 
     pub async fn complete_file(&self, key: &str) -> Result<(), DBError> {
-        let query = format!(r#"UPDATE '{key}' WITH {{ done: true }} IN {FILES_COLLECTION}"#);
+        let query = r#"UPDATE @key WITH { done: @done } IN @@collection"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", FILES_COLLECTION)
+            .bind_var("key", key)
+            .bind_var("done", true)
+            .build();
+
         self.inner
-            .aql_str::<Vec<serde_json::Value>>(&query)
+            .aql_query::<Vec<Value>>(aql)
             .await
             .map(|_| ())
             .map_err(DBError::from)
     }
 
     pub async fn get_done_file_keys(&self) -> Result<Vec<String>, DBError> {
-        let query = r#"FOR f IN files FILTER f.done == true RETURN f._key"#;
-        let keys: Vec<String> = self.inner.aql_str(query).await?;
+        let query = r#"FOR f IN @@collection FILTER f.done == @done RETURN f._key"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", FILES_COLLECTION)
+            .bind_var("done", true)
+            .build();
+
+        let keys: Vec<String> = self.inner.aql_query(aql).await?;
         Ok(keys)
     }
 
     pub async fn get_file_retries(&self, key: &str) -> Result<u8, DBError> {
-        let query =
-            format!(r#"FOR f in {FILES_COLLECTION} FILTER f._key == '{key}' RETURN f.retries"#);
-        let retries: Vec<u8> = self.inner.aql_str(&query).await?;
+        let query = r#"FOR f in @@collection FILTER f._key == @key RETURN f.retries"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", FILES_COLLECTION)
+            .bind_var("key", key)
+            .build();
+
+        let retries: Vec<u8> = self.inner.aql_query(aql).await?;
         if retries.is_empty() {
             Ok(0)
         } else {
@@ -127,32 +146,51 @@ impl DB {
     }
 
     pub async fn file_exists(&self, key: &str) -> Result<bool, DBError> {
-        let query =
-            format!(r#"FOR f IN {FILES_COLLECTION} FILTER f._key == "{key}" RETURN f._key"#);
-        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        let query = r#"FOR f IN @@collection FILTER f._key == @key RETURN f._key"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", FILES_COLLECTION)
+            .bind_var("key", key)
+            .build();
+
+        let keys: Vec<Option<String>> = self.inner.aql_query(aql).await?;
         Ok(!keys.is_empty())
     }
 
     pub async fn hotspot_exists(&self, pub_key: &PublicKeyBinary) -> Result<bool, DBError> {
-        let query = format!(
-            r#"FOR h IN {HOTSPOT_COLLECTION} FILTER h._key == "{pub_key}" RETURN h.pub_key"#
-        );
-        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        let query = r#"FOR h IN @@collection FILTER h._key == @pub_key RETURN h.pub_key"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", HOTSPOT_COLLECTION)
+            .bind_var("pub_key", pub_key.to_string())
+            .build();
+
+        let keys: Vec<Option<String>> = self.inner.aql_query(aql).await?;
         Ok(!keys.is_empty())
     }
 
     pub async fn beacon_exists(&self, poc_id: &str) -> Result<bool, DBError> {
-        let query =
-            format!(r#"FOR b IN {BEACON_COLLECTION} FILTER b._key == "{poc_id}" RETURN b.poc_id"#);
-        let keys: Vec<Option<String>> = self.inner.aql_str(&query).await?;
+        let query = r#"FOR b IN @@collection FILTER b._key == @poc_id RETURN b.poc_id"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", BEACON_COLLECTION)
+            .bind_var("poc_id", poc_id)
+            .build();
+
+        let keys: Vec<Option<String>> = self.inner.aql_query(aql).await?;
         Ok(!keys.is_empty())
     }
 
     pub async fn increment_file_retry(&self, key: &str) -> Result<(), DBError> {
-        let query =
-            format!(r#"UPDATE '{key}' WITH {{ retries: OLD.retries + 1 }} IN {FILES_COLLECTION}"#);
+        let query = r#"UPDATE @key WITH { retries: OLD.retries + 1 } IN @@collection"#;
+        let aql = AqlQuery::builder()
+            .query(query)
+            .bind_var("@collection", FILES_COLLECTION)
+            .bind_var("key", key)
+            .build();
+
         self.inner
-            .aql_str::<Vec<serde_json::Value>>(&query)
+            .aql_query::<Vec<Value>>(aql)
             .await
             .map(|_| ())
             .map_err(DBError::from)
@@ -191,18 +229,24 @@ impl DB {
         match hotspot_type {
             HotspotType::Beacon => {
                 // Update the poc_ids for it if it exists, else insert new document
-                let query = unindent(format!(
+                let query = unindent(
                     r#"
-                    UPSERT {{ _key: "{}" }}
-                    INSERT {}
-                    UPDATE {{ poc_ids: UNION_DISTINCT(OLD.poc_ids, ["{}"]) }}
-                    IN hotspots"#,
-                    hotspot._key,
-                    serde_json::to_value(&hotspot)?,
-                    hotspot.poc_ids[0]
-                ));
+                    UPSERT { _key: @pub_key }
+                    INSERT @hotspot
+                    UPDATE { poc_ids: UNION_DISTINCT(OLD.poc_ids, [@poc_id]) }
+                    IN @@collection"#,
+                );
+
+                let aql = AqlQuery::builder()
+                    .query(&query)
+                    .bind_var("@collection", HOTSPOT_COLLECTION)
+                    .bind_var("hotspot", serde_json::to_value(&hotspot)?)
+                    .bind_var("pub_key", hotspot._key.to_string())
+                    .bind_var("poc_id", hotspot.poc_ids[0].clone())
+                    .build();
+
                 self.inner
-                    .aql_str::<Vec<serde_json::Value>>(&query)
+                    .aql_query::<Vec<Value>>(aql)
                     .await
                     .map(|_| ())
                     .map_err(DBError::from)
@@ -218,6 +262,7 @@ impl DB {
                     )
                     .await
                 } else {
+                    // Don't do anything since this hotspot already exists
                     Ok(())
                 }
             }
@@ -246,32 +291,45 @@ impl DB {
         let witness_snr = edge.witness_snr;
         let witness_signal = edge.witness_signal;
         let ingest_latency = edge.ingest_latency;
-        let query = unindent(format!(
+
+        let query = unindent(
             r#"
-             UPSERT {{ _key: "{witness_edge_key}" }}
-             INSERT {{
-                 _key: "{witness_edge_key}",
-                 _from: "{HOTSPOT_COLLECTION}/{beacon_pub_key}",
-                 _to: "{HOTSPOT_COLLECTION}/{witness_pub_key}",
+             UPSERT { _key: @witness_edge_key }
+             INSERT {
+                 _key: @witness_edge_key,
+                 _from: CONCAT_SEPARATOR("/", "hotspots", @beacon_pub_key),
+                 _to: CONCAT_SEPARATOR("/", "hotspots", @witness_pub_key),
                  count: 1,
-                 distance: {distance},
-                 snr_hist: {{"{witness_snr}": 1}},
-                 signal_hist: {{"{witness_signal}": 1}},
-                 ingest_latency_hist: {{"{ingest_latency}": 1}}
-             }}
-             UPDATE {{
+                 distance: @distance,
+                 snr_hist: {@witness_snr: 1},
+                 signal_hist: {@witness_signal: 1},
+                 ingest_latency_hist: {@ingest_latency: 1},
+             }
+             UPDATE {
                  count: OLD.count + 1,
-                 snr_hist: MERGE(OLD.snr_hist, {{"{witness_snr}": OLD.snr_hist["{witness_snr}"] ? OLD.snr_hist["{witness_snr}"] + 1 : 1}}),
-                 signal_hist: MERGE(OLD.signal_hist, {{"{witness_signal}": OLD.signal_hist["{witness_signal}"] ? OLD.signal_hist["{witness_signal}"] + 1 : 1}}),
-                 ingest_latency_hist: MERGE(OLD.ingest_latency_hist, {{"{ingest_latency}": OLD.ingest_latency_hist["{ingest_latency}"] ? OLD.ingest_latency_hist["{ingest_latency}"] + 1 : 1}})
-             }}
-             IN {WITNESS_EDGE_COLLECTION}
-             "#
-        ));
+                 snr_hist: MERGE(OLD.snr_hist, {@witness_snr: OLD.snr_hist[@witness_snr] ? OLD.snr_hist[@witness_snr] + 1 : 1}),
+                 signal_hist: MERGE(OLD.signal_hist, {@witness_signal: OLD.signal_hist[@witness_signal] ? OLD.signal_hist[@witness_signal] + 1 : 1}),
+                 ingest_latency_hist: MERGE(OLD.ingest_latency_hist, {@ingest_latency: OLD.ingest_latency_hist[@ingest_latency] ? OLD.ingest_latency_hist[@ingest_latency] + 1 : 1})
+             }
+             IN @@witness_edge_collection
+             "#,
+        );
+
+        let aql = AqlQuery::builder()
+            .query(&query)
+            .bind_var("@witness_edge_collection", WITNESS_EDGE_COLLECTION)
+            .bind_var("witness_edge_key", witness_edge_key)
+            .bind_var("beacon_pub_key", beacon_pub_key.to_string())
+            .bind_var("witness_pub_key", witness_pub_key.to_string())
+            .bind_var("distance", distance)
+            .bind_var("witness_snr", witness_snr)
+            .bind_var("witness_signal", witness_signal)
+            .bind_var("ingest_latency", ingest_latency)
+            .build();
 
         tracing::debug!("upserting edge");
         self.inner
-            .aql_str::<Vec<serde_json::Value>>(&query)
+            .aql_query::<Vec<Value>>(aql)
             .await
             .map(|_| ())
             .map_err(DBError::from)
@@ -458,7 +516,7 @@ async fn create_hotspot_indices(inner: &ArangoDatabase) -> Result<()> {
     Ok(())
 }
 
-fn unindent(s: String) -> String {
+fn unindent(s: &str) -> String {
     s.lines()
         .map(|line| line.trim_start())
         .collect::<Vec<_>>()
