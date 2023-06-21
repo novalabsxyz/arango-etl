@@ -6,3 +6,4 @@ arangodb-apps-data
 *log
 *.log
 *.yaml
+*.json

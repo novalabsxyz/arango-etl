@@ -7,23 +7,36 @@ const PARENT_RESOLUTION: u8 = 5;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LocData {
+    pub str_loc: Option<String>,
     pub lat: Option<f64>,
     pub lng: Option<f64>,
     pub geo: Option<Geometry>,
 }
 
 impl LocData {
-    fn new(lat: Option<f64>, lng: Option<f64>, geo: Option<Geometry>) -> Self {
-        Self { lat, lng, geo }
+    fn new(
+        str_loc: Option<String>,
+        lat: Option<f64>,
+        lng: Option<f64>,
+        geo: Option<Geometry>,
+    ) -> Self {
+        Self {
+            str_loc,
+            lat,
+            lng,
+            geo,
+        }
     }
 
     pub fn from_h3(location: Option<u64>) -> Result<Self> {
         match location {
             Some(h3index) => {
                 let cell = CellIndex::try_from(h3index)?;
+                let cell_str = cell.to_string();
                 let latlng = LatLng::from(cell);
                 let geom = cell.to_geojson()?;
                 Ok(LocData::new(
+                    Some(cell_str),
                     Some(latlng.lat()),
                     Some(latlng.lng()),
                     Some(geom),
@@ -36,6 +49,7 @@ impl LocData {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParentLocData {
+    pub str_loc: Option<String>,
     pub loc: Option<u64>,
     pub lat: Option<f64>,
     pub lng: Option<f64>,
@@ -43,8 +57,20 @@ pub struct ParentLocData {
 }
 
 impl ParentLocData {
-    fn new(loc: Option<u64>, lat: Option<f64>, lng: Option<f64>, geo: Option<Geometry>) -> Self {
-        Self { loc, lat, lng, geo }
+    fn new(
+        str_loc: Option<String>,
+        loc: Option<u64>,
+        lat: Option<f64>,
+        lng: Option<f64>,
+        geo: Option<Geometry>,
+    ) -> Self {
+        Self {
+            str_loc,
+            loc,
+            lat,
+            lng,
+            geo,
+        }
     }
 
     pub fn from_h3(location: Option<u64>) -> Result<ParentLocData> {
@@ -54,8 +80,10 @@ impl ParentLocData {
                 match cell.parent(Resolution::try_from(PARENT_RESOLUTION)?) {
                     Some(parent) => {
                         let latlng = LatLng::from(parent);
+                        let str_loc = parent.to_string();
                         let geom = parent.to_geojson()?;
                         Ok(ParentLocData::new(
+                            Some(str_loc),
                             Some(u64::from(parent)),
                             Some(latlng.lat()),
                             Some(latlng.lng()),
