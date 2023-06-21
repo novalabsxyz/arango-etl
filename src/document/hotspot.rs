@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Hotspot {
     pub _key: PublicKeyBinary,
     pub poc_ids: Vec<String>,
+    str_location: Option<String>,
     location: Option<u64>,
     latitude: Option<f64>,
     longitude: Option<f64>,
@@ -26,6 +27,7 @@ impl TryFrom<&Beacon> for Hotspot {
         let name = get_name(&beacon.pub_key)?;
         Ok(Self {
             _key: beacon.pub_key.clone(),
+            str_location: beacon.str_location.clone(),
             location: beacon.location,
             latitude: beacon.latitude,
             longitude: beacon.longitude,
@@ -47,6 +49,7 @@ impl TryFrom<&Witness> for Hotspot {
         let name = get_name(&witness.pub_key)?;
         Ok(Self {
             _key: witness.pub_key.clone(),
+            str_location: witness.str_location.clone(),
             location: witness.location,
             latitude: witness.latitude,
             longitude: witness.longitude,
