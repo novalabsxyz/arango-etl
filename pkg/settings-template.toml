@@ -17,6 +17,6 @@ interval = 10
 bucket = "helium-mainnet-iot-verified-rewards"
 region = "us-west-2"
 
-[redis]
-endpoint = "http://localhost:6379"
-pool_size = 16
+# [redis]
+# endpoint = "http://localhost:6379"
+# pool_size = 16
