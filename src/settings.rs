@@ -1,8 +1,23 @@
-use chrono::Duration;
+use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 use config::{Config, Environment, File};
 use file_store::Settings as FSettings;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+/// We are doing this here instead of CLI args to make
+/// it easier to use with systemd unit files.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CurrentSettings {
+    /// After timestamp to start from
+    #[serde(default = "default_after_ts")]
+    pub after: NaiveDateTime,
+}
+
+impl CurrentSettings {
+    pub fn after_utc(&self) -> DateTime<Utc> {
+        Utc.from_utc_datetime(&self.after)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisSettings {
@@ -56,8 +71,16 @@ pub struct Settings {
     pub arangodb: ArangoDBSettings,
     // Configure current tracker settings
     pub tracker: TrackerSettings,
+    // Configure current mode settings
+    pub current: CurrentSettings,
     // Configure redis settings
     pub redis: Option<RedisSettings>,
+}
+
+pub fn default_after_ts() -> NaiveDateTime {
+    // NOTE: The default timestamp (picked randomly): 2023-06-27T17:48:50.980Z
+    // Just crash if this doesn't work.
+    NaiveDateTime::from_timestamp_millis(1687888130980).unwrap()
 }
 
 pub fn default_max_retries() -> u8 {

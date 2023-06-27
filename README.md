@@ -53,10 +53,10 @@ $ ./target/release/arango-etl -c settings.toml rehydrate --date "2023-05-01"
   UTC timestamp.
 - This mode starts a server which ticks at a specified interval (refer
   settings.toml.template), processes files matching timestamps greater than or
-  equal to the after timestamp.
+  equal to the after timestamp (also specified in the settings.toml.template).
 - After each tick the after timestamp internally gets updated to the last
   processed file's timestamp and continues waiting for newer files to appear.
 
 ```bash
-$ ./target/release/arango-etl -c settings.toml current --after "2023-05-01T00:00:00"
+$ ./target/release/arango-etl -c settings.toml current
 ```
