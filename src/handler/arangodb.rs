@@ -13,7 +13,6 @@ use arangors::{
     AqlQuery, ClientError, Collection, Connection, Database,
 };
 use file_store::{iot_valid_poc::IotPoc, FileInfo};
-use helium_crypto::PublicKeyBinary;
 use helium_proto::services::poc_lora::LoraPocV1;
 use serde_json::Value;
 
@@ -157,18 +156,6 @@ impl DB {
         Ok(!keys.is_empty())
     }
 
-    pub async fn hotspot_exists(&self, pub_key: &PublicKeyBinary) -> Result<bool, DBError> {
-        let query = r#"FOR h IN @@collection FILTER h._key == @pub_key RETURN h.pub_key"#;
-        let aql = AqlQuery::builder()
-            .query(query)
-            .bind_var("@collection", HOTSPOT_COLLECTION)
-            .bind_var("pub_key", pub_key.to_string())
-            .build();
-
-        let keys: Vec<Option<String>> = self.inner.aql_query(aql).await?;
-        Ok(!keys.is_empty())
-    }
-
     pub async fn beacon_exists(&self, poc_id: &str) -> Result<bool, DBError> {
         let query = r#"FOR b IN @@collection FILTER b._key == @poc_id RETURN b.poc_id"#;
         let aql = AqlQuery::builder()
@@ -226,46 +213,64 @@ impl DB {
         hotspot_type: HotspotType,
         hotspot: Hotspot,
     ) -> Result<(), DBError> {
-        match hotspot_type {
-            HotspotType::Beacon => {
-                // Update the poc_ids for it if it exists, else insert new document
-                let query = unindent(
+        let (query, poc_id) = match hotspot_type {
+            HotspotType::Beacon => (
+                unindent(
                     r#"
-                    UPSERT { _key: @pub_key }
-                    INSERT @hotspot
-                    UPDATE { poc_ids: UNION_DISTINCT(OLD.poc_ids, [@poc_id]) }
-                    IN @@collection"#,
+                UPSERT { _key: @pub_key }
+                INSERT @hotspot
+                UPDATE { poc_ids: UNION_DISTINCT(OLD.poc_ids, [@poc_id]),
+                         last_updated_at: MAX([OLD.last_updated_at, DATE_NOW()]),
+                         gain: @gain,
+                         elevation: @elevation}
+                IN @@collection"#,
+                ),
+                // NOTE: we only have a single poc_id for a beacon
+                // The query takes care of adding it to the list of poc_ids
+                Some(hotspot.poc_ids[0].clone()),
+            ),
+            HotspotType::Witness => (
+                unindent(
+                    r#"
+                UPSERT { _key: @pub_key }
+                INSERT @hotspot
+                UPDATE { last_updated_at: MAX([OLD.last_updated_at, DATE_NOW()]), gain: @gain, elevation: @elevation }
+                IN @@collection"#,
+                ),
+                None,
+            ),
+        };
+
+        let mut aql_builder = AqlQuery::builder()
+            .query(&query)
+            .bind_var("@collection", HOTSPOT_COLLECTION)
+            .bind_var("hotspot", serde_json::to_value(&hotspot)?)
+            .bind_var("pub_key", hotspot._key.to_string())
+            .bind_var("gain", hotspot.gain)
+            .bind_var("elevation", hotspot.elevation);
+
+        if let Some(poc_id) = poc_id {
+            aql_builder = aql_builder.bind_var("poc_id", poc_id);
+        }
+
+        let aql = aql_builder.build();
+
+        match self.inner.aql_query::<Vec<Value>>(aql).await {
+            Ok(_) => {
+                tracing::debug!("successfully populated {:?} hotspot", hotspot_type);
+                Ok(())
+            }
+            Err(ClientError::Arango(ae)) if [1210, 1200].contains(&ae.error_num()) => {
+                tracing::debug!(
+                    "warning, collection: {:?}, hotspot_type: {:?}, {:?}: {:?}",
+                    HOTSPOT_COLLECTION,
+                    hotspot_type,
+                    ae.error_num(),
+                    ae.message()
                 );
-
-                let aql = AqlQuery::builder()
-                    .query(&query)
-                    .bind_var("@collection", HOTSPOT_COLLECTION)
-                    .bind_var("hotspot", serde_json::to_value(&hotspot)?)
-                    .bind_var("pub_key", hotspot._key.to_string())
-                    .bind_var("poc_id", hotspot.poc_ids[0].clone())
-                    .build();
-
-                self.inner
-                    .aql_query::<Vec<Value>>(aql)
-                    .await
-                    .map(|_| ())
-                    .map_err(DBError::from)
+                Ok(())
             }
-            HotspotType::Witness => {
-                if !self.hotspot_exists(&hotspot._key).await? {
-                    // Just insert
-                    self.insert_document(
-                        &self.collections.hotspots,
-                        serde_json::to_value(hotspot)?,
-                        "hotspot",
-                        InsertOptions::builder().overwrite(false).build(),
-                    )
-                    .await
-                } else {
-                    // Don't do anything since this hotspot already exists
-                    Ok(())
-                }
-            }
+            Err(err) => Err(DBError::ArangoClientError(err)),
         }
     }
 
@@ -304,12 +309,14 @@ impl DB {
                  snr_hist: {@witness_snr: 1},
                  signal_hist: {@witness_signal: 1},
                  ingest_latency_hist: {@ingest_latency: 1},
+                 last_updated_at: DATE_NOW()
              }
              UPDATE {
                  count: OLD.count + 1,
                  snr_hist: MERGE(OLD.snr_hist, {@witness_snr: OLD.snr_hist[@witness_snr] ? OLD.snr_hist[@witness_snr] + 1 : 1}),
                  signal_hist: MERGE(OLD.signal_hist, {@witness_signal: OLD.signal_hist[@witness_signal] ? OLD.signal_hist[@witness_signal] + 1 : 1}),
-                 ingest_latency_hist: MERGE(OLD.ingest_latency_hist, {@ingest_latency: OLD.ingest_latency_hist[@ingest_latency] ? OLD.ingest_latency_hist[@ingest_latency] + 1 : 1})
+                 ingest_latency_hist: MERGE(OLD.ingest_latency_hist, {@ingest_latency: OLD.ingest_latency_hist[@ingest_latency] ? OLD.ingest_latency_hist[@ingest_latency] + 1 : 1}),
+                 last_updated_at: MAX([OLD.last_updated_at, DATE_NOW()])
              }
              IN @@witness_edge_collection
              "#,

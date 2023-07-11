@@ -1,5 +1,6 @@
 use crate::document::{get_name, Beacon, Witness};
 use anyhow::{Error, Result};
+use chrono::Utc;
 use geojson::Geometry;
 use helium_crypto::PublicKeyBinary;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,9 @@ pub struct Hotspot {
     parent_longitude: Option<f64>,
     parent_geo: Option<Geometry>,
     name: String,
+    last_updated_at: Option<u64>,
+    pub gain: Option<i32>,
+    pub elevation: Option<i32>,
 }
 
 impl TryFrom<&Beacon> for Hotspot {
@@ -40,6 +44,9 @@ impl TryFrom<&Beacon> for Hotspot {
             parent_geo: beacon.parent_geo.clone(),
             name,
             poc_ids: vec![beacon.poc_id.clone()],
+            last_updated_at: Some(Utc::now().timestamp_millis() as u64),
+            gain: Some(beacon.gain),
+            elevation: Some(beacon.elevation),
         })
     }
 }
@@ -63,6 +70,9 @@ impl TryFrom<&Witness> for Hotspot {
             parent_geo: witness.parent_geo.clone(),
             name,
             poc_ids: vec![],
+            last_updated_at: Some(Utc::now().timestamp_millis() as u64),
+            gain: Some(witness.gain),
+            elevation: Some(witness.elevation),
         })
     }
 }
